@@ -7,7 +7,7 @@
  */
 
 #include "icm42688p.h"
-#include "stm32h7xx_hal.h"  /* HAL_Delay 사용 */
+#include "stm32h7xx_hal.h" /* HAL_Delay 사용 */
 
 /* ── Helper: raw 16-bit 조합 (big-endian) ───────────── */
 static inline int16_t combine_bytes(uint8_t high, uint8_t low)
@@ -20,57 +20,62 @@ static inline int16_t combine_bytes(uint8_t high, uint8_t low)
 int icm42688p_init(spi_dev_t *dev, const icm42688p_config_t *cfg)
 {
     icm42688p_config_t default_cfg = ICM42688P_DEFAULT_CONFIG;
-    if (cfg == NULL) {
+    if (cfg == NULL)
+    {
         cfg = &default_cfg;
     }
 
     /* 1. Soft Reset */
-    if (spi_write_reg(dev, ICM42688P_REG_DEVICE_CONFIG,
-                      ICM42688P_SOFT_RESET) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_DEVICE_CONFIG, ICM42688P_SOFT_RESET) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    HAL_Delay(1);  /* 데이터시트: soft reset 후 최소 1ms 대기 */
+    HAL_Delay(1); /* 데이터시트: soft reset 후 최소 1ms 대기 */
 
     /* 2. WHO_AM_I 검증 */
     uint8_t who = 0;
-    if (spi_read_reg(dev, ICM42688P_REG_WHO_AM_I, &who) < 0) {
+    if (spi_read_reg(dev, ICM42688P_REG_WHO_AM_I, &who) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (who != ICM42688P_WHO_AM_I_VAL) {
+    if (who != ICM42688P_WHO_AM_I_VAL)
+    {
         return SENSOR_ERR_ID;
     }
 
     /* 3. Bank 0 선택 (기본값이지만 명시적으로) */
-    if (spi_write_reg(dev, ICM42688P_REG_BANK_SEL, 0x00) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_BANK_SEL, 0x00) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
     /* 4. 자이로 설정: FS + ODR */
     uint8_t gyro_cfg = cfg->gyro_fs | cfg->gyro_odr;
-    if (spi_write_reg(dev, ICM42688P_REG_GYRO_CONFIG0, gyro_cfg) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_GYRO_CONFIG0, gyro_cfg) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
     /* 5. 가속도계 설정: FS + ODR */
     uint8_t accel_cfg = cfg->accel_fs | cfg->accel_odr;
-    if (spi_write_reg(dev, ICM42688P_REG_ACCEL_CONFIG0, accel_cfg) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_ACCEL_CONFIG0, accel_cfg) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
     /* 6. INT1 설정: Data Ready 인터럽트 (Push-Pull, Active High, Pulsed) */
-    if (spi_write_reg(dev, ICM42688P_REG_INT_CONFIG,
-                      ICM42688P_INT1_ACTIVE_HIGH |
-                      ICM42688P_INT1_PUSH_PULL) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_INT_CONFIG, ICM42688P_INT1_ACTIVE_HIGH | ICM42688P_INT1_PUSH_PULL) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (spi_write_reg(dev, ICM42688P_REG_INT_SOURCE0,
-                      ICM42688P_INT_DRDY_EN) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_INT_SOURCE0, ICM42688P_INT_DRDY_EN) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
     /* 7. Accel + Gyro Low Noise 모드 활성화 */
-    if (spi_write_reg(dev, ICM42688P_REG_PWR_MGMT0,
-                      ICM42688P_PWR_GYRO_LN | ICM42688P_PWR_ACCEL_LN) < 0) {
+    if (spi_write_reg(dev, ICM42688P_REG_PWR_MGMT0, ICM42688P_PWR_GYRO_LN | ICM42688P_PWR_ACCEL_LN) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -82,10 +87,12 @@ int icm42688p_init(spi_dev_t *dev, const icm42688p_config_t *cfg)
 
     /* 8. 설정 검증: GYRO_CONFIG0 readback */
     uint8_t readback = 0;
-    if (spi_read_reg(dev, ICM42688P_REG_GYRO_CONFIG0, &readback) < 0) {
+    if (spi_read_reg(dev, ICM42688P_REG_GYRO_CONFIG0, &readback) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (readback != gyro_cfg) {
+    if (readback != gyro_cfg)
+    {
         return SENSOR_ERR_CONFIG;
     }
 
@@ -98,7 +105,8 @@ int icm42688p_read_accel(spi_dev_t *dev, vec3f_t *accel)
 {
     uint8_t buf[6];
 
-    if (spi_read_bytes(dev, ICM42688P_REG_ACCEL_DATA_X1, buf, 6) < 0) {
+    if (spi_read_bytes(dev, ICM42688P_REG_ACCEL_DATA_X1, buf, 6) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -119,7 +127,8 @@ int icm42688p_read_gyro(spi_dev_t *dev, vec3f_t *gyro)
 {
     uint8_t buf[6];
 
-    if (spi_read_bytes(dev, ICM42688P_REG_GYRO_DATA_X1, buf, 6) < 0) {
+    if (spi_read_bytes(dev, ICM42688P_REG_GYRO_DATA_X1, buf, 6) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -144,7 +153,8 @@ int icm42688p_read_accel_gyro(spi_dev_t *dev, vec3f_t *accel, vec3f_t *gyro)
      */
     uint8_t buf[12];
 
-    if (spi_read_bytes(dev, ICM42688P_REG_ACCEL_DATA_X1, buf, 12) < 0) {
+    if (spi_read_bytes(dev, ICM42688P_REG_ACCEL_DATA_X1, buf, 12) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -175,7 +185,8 @@ int icm42688p_read_temp(spi_dev_t *dev, float *temp_c)
 {
     uint8_t buf[2];
 
-    if (spi_read_bytes(dev, ICM42688P_REG_TEMP_DATA1, buf, 2) < 0) {
+    if (spi_read_bytes(dev, ICM42688P_REG_TEMP_DATA1, buf, 2) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 

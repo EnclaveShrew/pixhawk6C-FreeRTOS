@@ -23,64 +23,69 @@ static inline int16_t combine_bytes_le(uint8_t lsb, uint8_t msb)
 int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
 {
     bmi055_config_t default_cfg = BMI055_DEFAULT_CONFIG;
-    if (cfg == NULL) {
+    if (cfg == NULL)
+    {
         cfg = &default_cfg;
     }
 
     /* 1. Soft Reset — 가속도계, 자이로 각각 */
-    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_SOFTRESET,
-                      BMI055_SOFT_RESET_CMD) < 0) {
+    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_SOFTRESET, BMI055_SOFT_RESET_CMD) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_SOFTRESET,
-                      BMI055_SOFT_RESET_CMD) < 0) {
+    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_SOFTRESET, BMI055_SOFT_RESET_CMD) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    HAL_Delay(5);  /* 데이터시트: soft reset 후 부팅 시간 */
+    HAL_Delay(5); /* 데이터시트: soft reset 후 부팅 시간 */
 
     /* 2. Chip ID 검증 — 가속도계 */
     uint8_t acc_id = 0;
-    if (spi_read_reg(dev->accel_dev, BMI055_ACC_REG_CHIP_ID, &acc_id) < 0) {
+    if (spi_read_reg(dev->accel_dev, BMI055_ACC_REG_CHIP_ID, &acc_id) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (acc_id != BMI055_ACC_CHIP_ID_VAL) {
+    if (acc_id != BMI055_ACC_CHIP_ID_VAL)
+    {
         return SENSOR_ERR_ID;
     }
 
     /* 3. Chip ID 검증 — 자이로 */
     uint8_t gyro_id = 0;
-    if (spi_read_reg(dev->gyro_dev, BMI055_GYRO_REG_CHIP_ID, &gyro_id) < 0) {
+    if (spi_read_reg(dev->gyro_dev, BMI055_GYRO_REG_CHIP_ID, &gyro_id) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (gyro_id != BMI055_GYRO_CHIP_ID_VAL) {
+    if (gyro_id != BMI055_GYRO_CHIP_ID_VAL)
+    {
         return SENSOR_ERR_ID;
     }
 
     /* 4. 가속도계 설정: Range → BW → Normal mode */
-    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_RANGE,
-                      cfg->accel_range) < 0) {
+    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_RANGE, cfg->accel_range) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_BW,
-                      cfg->accel_bw) < 0) {
+    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_BW, cfg->accel_bw) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_LPW,
-                      BMI055_ACC_PM_NORMAL) < 0) {
+    if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_LPW, BMI055_ACC_PM_NORMAL) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
     /* 5. 자이로 설정: Range → BW → Normal mode */
-    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_RANGE,
-                      cfg->gyro_range) < 0) {
+    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_RANGE, cfg->gyro_range) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_BW,
-                      cfg->gyro_bw) < 0) {
+    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_BW, cfg->gyro_bw) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_LPM1,
-                      BMI055_GYRO_PM_NORMAL) < 0) {
+    if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_LPM1, BMI055_GYRO_PM_NORMAL) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -89,20 +94,22 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
 
     /* 6. 설정 검증: 가속도계 Range readback */
     uint8_t readback = 0;
-    if (spi_read_reg(dev->accel_dev, BMI055_ACC_REG_PMU_RANGE,
-                     &readback) < 0) {
+    if (spi_read_reg(dev->accel_dev, BMI055_ACC_REG_PMU_RANGE, &readback) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (readback != cfg->accel_range) {
+    if (readback != cfg->accel_range)
+    {
         return SENSOR_ERR_CONFIG;
     }
 
     /* 7. 설정 검증: 자이로 Range readback */
-    if (spi_read_reg(dev->gyro_dev, BMI055_GYRO_REG_RANGE,
-                     &readback) < 0) {
+    if (spi_read_reg(dev->gyro_dev, BMI055_GYRO_REG_RANGE, &readback) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
-    if (readback != cfg->gyro_range) {
+    if (readback != cfg->gyro_range)
+    {
         return SENSOR_ERR_CONFIG;
     }
 
@@ -122,8 +129,8 @@ int bmi055_read_accel(bmi055_dev_t *dev, vec3f_t *accel)
      */
     uint8_t buf[6];
 
-    if (spi_read_bytes(dev->accel_dev, BMI055_ACC_REG_DATA_X_LSB,
-                       buf, 6) < 0) {
+    if (spi_read_bytes(dev->accel_dev, BMI055_ACC_REG_DATA_X_LSB, buf, 6) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -148,8 +155,8 @@ int bmi055_read_gyro(bmi055_dev_t *dev, vec3f_t *gyro)
      */
     uint8_t buf[6];
 
-    if (spi_read_bytes(dev->gyro_dev, BMI055_GYRO_REG_RATE_X_LSB,
-                       buf, 6) < 0) {
+    if (spi_read_bytes(dev->gyro_dev, BMI055_GYRO_REG_RATE_X_LSB, buf, 6) < 0)
+    {
         return SENSOR_ERR_COMM;
     }
 
@@ -173,7 +180,8 @@ int bmi055_read_accel_gyro(bmi055_dev_t *dev, vec3f_t *accel, vec3f_t *gyro)
      * ICM-42688-P처럼 12바이트 버스트 읽기는 불가.
      */
     int ret = bmi055_read_accel(dev, accel);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return ret;
     }
 

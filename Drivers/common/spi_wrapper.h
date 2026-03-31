@@ -10,10 +10,11 @@
 #include <stdint.h>
 
 /* ── SPI device descriptor (SPI 핸들 + CS 핀 정보) ── */
-typedef struct {
+typedef struct
+{
     SPI_HandleTypeDef *hspi;
-    GPIO_TypeDef      *cs_port;
-    uint16_t           cs_pin;
+    GPIO_TypeDef *cs_port;
+    uint16_t cs_pin;
 } spi_dev_t;
 
 /**

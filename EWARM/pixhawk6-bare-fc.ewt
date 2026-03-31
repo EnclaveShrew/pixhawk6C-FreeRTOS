@@ -1215,6 +1215,12 @@
     <group>
         <name>Drivers</name>
         <group>
+            <name>baro</name>
+            <file>
+                <name>$PROJ_DIR$\..\Drivers\baro\ms5611.c</name>
+            </file>
+        </group>
+        <group>
             <name>CMSIS</name>
             <file>
                 <name>$PROJ_DIR$\..\Core\Src\system_stm32h7xx.c</name>
@@ -1226,7 +1232,19 @@
                 <name>$PROJ_DIR$\..\Drivers\common\debug_uart.c</name>
             </file>
             <file>
+                <name>$PROJ_DIR$\..\Drivers\common\i2c_wrapper.c</name>
+            </file>
+            <file>
                 <name>$PROJ_DIR$\..\Drivers\common\spi_wrapper.c</name>
+            </file>
+            <file>
+                <name>$PROJ_DIR$\..\Drivers\common\uart_wrapper.c</name>
+            </file>
+        </group>
+        <group>
+            <name>GPS</name>
+            <file>
+                <name>$PROJ_DIR$\..\Drivers\gps\ubx_m10.c</name>
             </file>
         </group>
         <group>
@@ -1236,6 +1254,12 @@
             </file>
             <file>
                 <name>$PROJ_DIR$\..\Drivers\imu\icm42688p.c</name>
+            </file>
+        </group>
+        <group>
+            <name>Mag</name>
+            <file>
+                <name>$PROJ_DIR$\..\Drivers\mag\ist8310.c</name>
             </file>
         </group>
         <group>

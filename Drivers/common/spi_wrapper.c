@@ -8,10 +8,10 @@
 
 #include "spi_wrapper.h"
 
-#define SPI_TIMEOUT_MS  10
+#define SPI_TIMEOUT_MS 10
 
 /* SPI 읽기: 최상위 비트를 1로 설정 (대부분의 SPI 센서 규약) */
-#define SPI_READ_FLAG   0x80
+#define SPI_READ_FLAG 0x80
 
 /* ── CS assert/deassert ─────────────────────────────── */
 static inline void cs_low(const spi_dev_t *dev)
@@ -28,15 +28,15 @@ static inline void cs_high(const spi_dev_t *dev)
 
 int spi_read_reg(const spi_dev_t *dev, uint8_t reg, uint8_t *val)
 {
-    uint8_t tx[2] = { reg | SPI_READ_FLAG, 0x00 };
-    uint8_t rx[2] = { 0 };
+    uint8_t tx[2] = {reg | SPI_READ_FLAG, 0x00};
+    uint8_t rx[2] = {0};
 
     cs_low(dev);
-    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(
-        dev->hspi, tx, rx, 2, SPI_TIMEOUT_MS);
+    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(dev->hspi, tx, rx, 2, SPI_TIMEOUT_MS);
     cs_high(dev);
 
-    if (status != HAL_OK) {
+    if (status != HAL_OK)
+    {
         return -1;
     }
     *val = rx[1];
@@ -46,27 +46,25 @@ int spi_read_reg(const spi_dev_t *dev, uint8_t reg, uint8_t *val)
 int spi_write_reg(const spi_dev_t *dev, uint8_t reg, uint8_t val)
 {
     /* 쓰기: 최상위 비트 0 (읽기 플래그 없음) */
-    uint8_t tx[2] = { reg & 0x7F, val };
+    uint8_t tx[2] = {reg & 0x7F, val};
 
     cs_low(dev);
-    HAL_StatusTypeDef status = HAL_SPI_Transmit(
-        dev->hspi, tx, 2, SPI_TIMEOUT_MS);
+    HAL_StatusTypeDef status = HAL_SPI_Transmit(dev->hspi, tx, 2, SPI_TIMEOUT_MS);
     cs_high(dev);
 
     return (status == HAL_OK) ? 0 : -1;
 }
 
-int spi_read_bytes(const spi_dev_t *dev, uint8_t reg,
-                   uint8_t *buf, uint16_t len)
+int spi_read_bytes(const spi_dev_t *dev, uint8_t reg, uint8_t *buf, uint16_t len)
 {
     uint8_t tx_addr = reg | SPI_READ_FLAG;
 
     cs_low(dev);
 
     /* 레지스터 주소 전송 */
-    HAL_StatusTypeDef status = HAL_SPI_Transmit(
-        dev->hspi, &tx_addr, 1, SPI_TIMEOUT_MS);
-    if (status != HAL_OK) {
+    HAL_StatusTypeDef status = HAL_SPI_Transmit(dev->hspi, &tx_addr, 1, SPI_TIMEOUT_MS);
+    if (status != HAL_OK)
+    {
         cs_high(dev);
         return -1;
     }
