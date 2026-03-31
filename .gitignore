@@ -1,0 +1,13 @@
+# Build output
+EWARM/pixhawk6-bare-fc/Obj/
+EWARM/pixhawk6-bare-fc/List/
+EWARM/pixhawk6-bare-fc/Exe/
+EWARM/settings/
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Personal notes
+docs/개념 및 질문.txt
+docs/개념 및 질문 답변.md
