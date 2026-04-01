@@ -1202,6 +1202,15 @@
                 </file>
             </group>
             <group>
+                <name>Control</name>
+                <group>
+                    <name>Mixer</name>
+                    <file>
+                        <name>$PROJ_DIR$\..\control\mixer\motor_mixer.c</name>
+                    </file>
+                </group>
+            </group>
+            <group>
                 <name>Core</name>
                 <file>
                     <name>$PROJ_DIR$\..\Core\Src\main.c</name>

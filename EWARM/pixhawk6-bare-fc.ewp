@@ -355,6 +355,7 @@
                     <state>C:\FC_Firmware_Project\pixhawk6-bare-fc\ahrs</state>
                     <state>C:\FC_Firmware_Project\pixhawk6-bare-fc\math</state>
                     <state>C:\FC_Firmware_Project\pixhawk6-bare-fc\common</state>
+                    <state>C:\FC_Firmware_Project\pixhawk6-bare-fc\control\interface</state>
                 </option>
                 <option>
                     <name>CCStdIncCheck</name>
@@ -1044,6 +1045,15 @@
                 <file>
                     <name>$PROJ_DIR$\..\ahrs\complementary.c</name>
                 </file>
+            </group>
+            <group>
+                <name>Control</name>
+                <group>
+                    <name>Mixer</name>
+                    <file>
+                        <name>$PROJ_DIR$\..\control\mixer\motor_mixer.c</name>
+                    </file>
+                </group>
             </group>
             <group>
                 <name>Core</name>
