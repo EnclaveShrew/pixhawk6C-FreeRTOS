@@ -1196,6 +1196,12 @@
         <group>
             <name>User</name>
             <group>
+                <name>AHRS</name>
+                <file>
+                    <name>$PROJ_DIR$\..\ahrs\complementary.c</name>
+                </file>
+            </group>
+            <group>
                 <name>Core</name>
                 <file>
                     <name>$PROJ_DIR$\..\Core\Src\main.c</name>
@@ -1208,6 +1214,12 @@
                 </file>
                 <file>
                     <name>$PROJ_DIR$\..\Core\Src\stm32h7xx_it.c</name>
+                </file>
+            </group>
+            <group>
+                <name>Math</name>
+                <file>
+                    <name>$PROJ_DIR$\..\math\quaternion.c</name>
                 </file>
             </group>
         </group>
