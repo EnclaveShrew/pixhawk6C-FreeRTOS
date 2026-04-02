@@ -2,19 +2,34 @@
  * @file main.c
  * @brief FreeRTOS task initialization and entry point
  *
- * 태스크 구조 및 우선순위:
- *   [7] sensor_task     — 1kHz, IMU 읽기 (최고)
- *   [6] ahrs_task       — 1kHz, 자세 추정
- *   [5] control_task    — 1kHz(rate) / 250Hz(attitude), 제어 루프
- *   [3] mavlink_task    — 50Hz, 텔레메트리 송수신
- *   [2] gps_task        — 10Hz, GPS 파싱
- *   [1] log_task        — 가변, SD카드 로깅 (최저)
- *   [4] watchdog_task   — 10Hz, 태스크 헬스 모니터링
+ * Requirement: configTICK_RATE_HZ = 1000 (1ms tick)
+ *   pdMS_TO_TICKS(1) must equal 1 for 1kHz tasks to work correctly.
+ *   If tick rate < 1000, pdMS_TO_TICKS(1) = 0 -> 100% CPU usage.
+ *
+ * Task execution model:
+ *   sensor/ahrs/control all run at 1kHz but with different priorities.
+ *   sensor(7) completes -> yield -> ahrs(6) runs -> yield -> control(5) runs.
+ *   Total execution time of all 3 tasks must stay under 1ms.
+ *   If exceeded, lower-priority tasks starve -> watchdog detects it.
+ *
+ * Task priorities:
+ *   [7] sensor_task     — 1kHz, IMU read (highest)
+ *   [6] ahrs_task       — 1kHz, attitude estimation
+ *   [5] control_task    — 1kHz(rate) / 250Hz(attitude), control loop
+ *   [3] mavlink_task    — 50Hz, telemetry TX/RX
+ *   [2] gps_task        — 10Hz, GPS parsing
+ *   [1] log_task        — variable, SD card logging (lowest)
+ *   [4] watchdog_task   — 10Hz, task health monitoring
  */
 
 #include "stm32h7xx_hal.h"
 #include "FreeRTOS.h"
 #include "task.h"
+
+/* 1kHz tasks will not work if configTICK_RATE_HZ is not 1000 */
+#if configTICK_RATE_HZ < 1000
+    #error "configTICK_RATE_HZ must be >= 1000 for 1kHz task scheduling"
+#endif
 
 /* Sensor drivers */
 #include "icm42688p.h"
@@ -30,6 +45,8 @@
 /* Control */
 #include "controller_interface.h"
 #include "cascade_pid.h"
+#include "lqr_controller.h"
+#include "indi_controller.h"
 #include "motor_mixer.h"
 
 /* Communication */
@@ -43,7 +60,7 @@
 #include "sd_logger.h"
 
 /* ══════════════════════════════════════════════════════
- *  Task priorities (높을수록 높은 우선순위)
+ *  Task priorities (higher = higher priority)
  * ══════════════════════════════════════════════════════ */
 
 #define TASK_PRIO_SENSOR    7
@@ -59,7 +76,7 @@
  * ══════════════════════════════════════════════════════ */
 
 #define STACK_SENSOR    512
-#define STACK_AHRS      1024    /* EKF 행렬 연산으로 큰 스택 필요 */
+#define STACK_AHRS      2048    /* EKF matrix ops: predict ~800B + update ~850B + context */
 #define STACK_CONTROL   512
 #define STACK_WATCHDOG  256
 #define STACK_MAVLINK   512
@@ -79,15 +96,66 @@ static TaskHandle_t gps_task_handle;
 static TaskHandle_t log_task_handle;
 
 /* ══════════════════════════════════════════════════════
- *  Shared data (더블 버퍼링 또는 atomic 접근)
+ *  Shared data (protected by critical section)
+ *
+ *  vec3f_t (12 bytes) is not atomic, so
+ *  reads/writes are protected with taskENTER_CRITICAL.
+ *  Critical sections are a few us, no impact on real-time performance.
  * ══════════════════════════════════════════════════════ */
 
-static volatile vec3f_t g_accel;
-static volatile vec3f_t g_gyro;
-static volatile float g_roll, g_pitch, g_yaw;
+static vec3f_t g_accel;
+static vec3f_t g_gyro;
+static float g_roll, g_pitch, g_yaw;
 
-/* Active controller (런타임 교체 가능) */
+static inline void shared_write_imu(const vec3f_t *accel, const vec3f_t *gyro)
+{
+    taskENTER_CRITICAL();
+    g_accel = *accel;
+    g_gyro = *gyro;
+    taskEXIT_CRITICAL();
+}
+
+static inline void shared_read_imu(vec3f_t *accel, vec3f_t *gyro)
+{
+    taskENTER_CRITICAL();
+    *accel = g_accel;
+    *gyro = g_gyro;
+    taskEXIT_CRITICAL();
+}
+
+static inline void shared_write_euler(float roll, float pitch, float yaw)
+{
+    taskENTER_CRITICAL();
+    g_roll = roll;
+    g_pitch = pitch;
+    g_yaw = yaw;
+    taskEXIT_CRITICAL();
+}
+
+static inline void shared_read_euler(float *roll, float *pitch, float *yaw)
+{
+    taskENTER_CRITICAL();
+    *roll = g_roll;
+    *pitch = g_pitch;
+    *yaw = g_yaw;
+    taskEXIT_CRITICAL();
+}
+
+/* Active controller (swappable at runtime) */
 static controller_t *g_active_ctrl = &cascade_pid_controller;
+
+/*
+ * Controller switch request (mavlink_task -> control_task)
+ * MAVLink callback only sets a flag; actual switch is done in control_task.
+ * control_task performs the switch safely at the start of its loop.
+ * -> reset/init and update run sequentially in the same task, no race condition.
+ */
+/*
+ * int8_t store is atomic on ARM Cortex-M (single byte store instruction).
+ * For portability, stdatomic.h or sig_atomic_t would be preferable,
+ * but avoided here due to IAR EWARM C11 mode dependency.
+ */
+static volatile int8_t g_ctrl_switch_request = -1;  /* -1 = no request, 0~2 = target type */
 
 /* ══════════════════════════════════════════════════════
  *  Sensor task — 1kHz
@@ -98,20 +166,17 @@ static void sensor_task(void *param)
     (void)param;
     TickType_t last_wake = xTaskGetTickCount();
 
-    /* TODO: spi_dev_t, i2c_dev_t 초기화 (CubeMX에서 생성된 핸들 연결) */
+    /* TODO: Initialize spi_dev_t, i2c_dev_t (connect CubeMX-generated handles) */
 
     for (;;)
     {
-        /* IMU 읽기 (Primary: ICM-42688-P) */
+        /* Read IMU (Primary: ICM-42688-P) */
         vec3f_t accel, gyro;
         /* if (icm42688p_read_accel_gyro(&imu_dev, &accel, &gyro) == SENSOR_OK) */
         /* { */
-        /*     g_accel = accel; */
-        /*     g_gyro = gyro; */
+        /*     shared_write_imu(&accel, &gyro); */
+        /*     watchdog_feed(WATCHDOG_TASK_SENSOR);  <- feed only on successful read */
         /* } */
-
-        /* 센서 태스크 헬스 플래그 설정 */
-        watchdog_feed(WATCHDOG_TASK_SENSOR);
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));  /* 1kHz */
     }
@@ -129,20 +194,45 @@ static void ahrs_task(void *param)
     ekf_state_t ekf;
     ekf_init(&ekf, NULL);
 
+    uint32_t prev_cycles = 0;
+    uint8_t first_run = 1;
+
     for (;;)
     {
-        vec3f_t accel = *(vec3f_t *)&g_accel;
-        vec3f_t gyro = *(vec3f_t *)&g_gyro;
+        vec3f_t accel, gyro;
+        shared_read_imu(&accel, &gyro);
 
-        float dt = 0.001f;  /* 1kHz → 1ms */
+        /* Measure actual elapsed time via DWT cycle counter */
+        uint32_t now_cycles = DWT->CYCCNT;
+        if (first_run)
+        {
+            /* First frame: stamp time only, skip EKF to avoid dt spike */
+            prev_cycles = now_cycles;
+            first_run = 0;
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));
+            continue;
+        }
+        float dt = (float)(now_cycles - prev_cycles) / (float)SystemCoreClock;
+        prev_cycles = now_cycles;
 
         ekf_predict(&ekf, &gyro, dt);
         ekf_update_accel(&ekf, &accel);
-        /* ekf_update_mag(&ekf, &mag); — 자력계 데이터 있을 때 */
+        /* ekf_update_mag(&ekf, &mag); — when magnetometer data available */
 
-        ekf_get_euler(&ekf, (float *)&g_roll, (float *)&g_pitch, (float *)&g_yaw);
+        float roll, pitch, yaw;
+        ekf_get_euler(&ekf, &roll, &pitch, &yaw);
+        shared_write_euler(roll, pitch, yaw);
 
+        /* EKF computation completion means AHRS is operating normally */
         watchdog_feed(WATCHDOG_TASK_AHRS);
+
+        /*
+         * Stack high water mark check (development only).
+         * Remove or reduce frequency in production.
+         * If watermark drops below ~100 words, increase STACK_AHRS.
+         */
+        /* UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL); */
+        /* if (hwm < 100) error_handler_report(ERR_STACK_OVERFLOW); */
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));  /* 1kHz */
     }
@@ -157,38 +247,79 @@ static void control_task(void *param)
     (void)param;
     TickType_t last_wake = xTaskGetTickCount();
 
-    g_active_ctrl->init(NULL);
+    g_active_ctrl->init(g_active_ctrl->ctx, NULL);
     mixer_init(NULL);
+
+    uint32_t ctrl_prev_cycles = 0;
+    uint8_t ctrl_first_run = 1;
 
     for (;;)
     {
+        /* First frame: stamp time only, skip control to avoid dt spike */
+        if (ctrl_first_run)
+        {
+            ctrl_prev_cycles = DWT->CYCCNT;
+            ctrl_first_run = 0;
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        /* Process controller switch request (safe in control_task context) */
+        int8_t req = g_ctrl_switch_request;
+        if (req >= 0)
+        {
+            g_active_ctrl->reset(g_active_ctrl->ctx);
+            switch (req)
+            {
+            case CTRL_TYPE_PID:
+                g_active_ctrl = &cascade_pid_controller;
+                break;
+            case CTRL_TYPE_LQR:
+                g_active_ctrl = &lqr_controller;
+                break;
+            case CTRL_TYPE_INDI:
+                g_active_ctrl = &indi_controller;
+                break;
+            }
+            g_active_ctrl->init(g_active_ctrl->ctx, NULL);
+            g_ctrl_switch_request = -1;
+        }
+
         controller_input_t input;
         controller_output_t output;
 
-        /* 목표 자세 (RC 입력 또는 자동 비행에서 설정) */
+        /* Target attitude (set from RC input or autonomous flight) */
         input.target_attitude.w = 1.0f;
         input.target_attitude.x = 0.0f;
         input.target_attitude.y = 0.0f;
         input.target_attitude.z = 0.0f;
 
-        /* 현재 자세 (AHRS 출력) */
-        /* TODO: euler_to_quat로 변환하거나 EKF에서 직접 쿼터니언 가져오기 */
+        /* Current attitude (AHRS output) */
+        /* TODO: convert via euler_to_quat or get quaternion directly from EKF */
         input.current_attitude.w = 1.0f;
         input.current_attitude.x = 0.0f;
         input.current_attitude.y = 0.0f;
         input.current_attitude.z = 0.0f;
 
-        input.gyro = *(vec3f_t *)&g_gyro;
-        input.thrust = 0.0f;   /* RC 스로틀에서 설정 */
-        input.dt = 0.001f;
+        vec3f_t cur_accel, cur_gyro;
+        shared_read_imu(&cur_accel, &cur_gyro);
+        input.gyro = cur_gyro;
+        input.thrust = 0.0f;   /* Set from RC throttle */
 
-        g_active_ctrl->update(&input, &output);
+        /* Measure actual dt via DWT cycle counter */
+        uint32_t ctrl_now = DWT->CYCCNT;
+        input.dt = (float)(ctrl_now - ctrl_prev_cycles) / (float)SystemCoreClock;
+        ctrl_prev_cycles = ctrl_now;
+
+        g_active_ctrl->update(g_active_ctrl->ctx, &input, &output);
 
         mixer_output_t motor_out;
         mixer_mix(&output, &motor_out);
 
-        /* TODO: PWM 출력 (IO Processor 또는 직접 타이머) */
+        /* TODO: PWM output (via IO Processor or direct timer) */
+        /* Move watchdog_feed after successful PWM output */
 
+        /* Control computation complete = normal operation (until PWM output is implemented) */
         watchdog_feed(WATCHDOG_TASK_CONTROL);
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1));  /* 1kHz */
@@ -204,27 +335,13 @@ static uint32_t g_mav_counter = 0;
 
 static void mavlink_rx_callback(const mavlink_message_t *msg)
 {
-    /* 수신 메시지 처리 */
+    /* Handle received message: only set switch request, actual switch in control_task */
     if (msg->msg_id == MAVLINK_MSG_CTRL_SWITCH && msg->payload_len >= 1)
     {
         uint8_t target = msg->payload[0];
-        switch (target)
+        if (target <= CTRL_TYPE_INDI)
         {
-        case CTRL_TYPE_PID:
-            g_active_ctrl->reset();
-            g_active_ctrl = &cascade_pid_controller;
-            g_active_ctrl->init(NULL);
-            break;
-        case CTRL_TYPE_LQR:
-            g_active_ctrl->reset();
-            /* g_active_ctrl = &lqr_controller; */
-            /* g_active_ctrl->init(NULL); */
-            break;
-        case CTRL_TYPE_INDI:
-            g_active_ctrl->reset();
-            /* g_active_ctrl = &indi_controller; */
-            /* g_active_ctrl->init(NULL); */
-            break;
+            g_ctrl_switch_request = (int8_t)target;
         }
     }
 }
@@ -234,15 +351,15 @@ static void mavlink_task(void *param)
     (void)param;
     TickType_t last_wake = xTaskGetTickCount();
 
-    /* TODO: UART 핸들 연결 */
+    /* TODO: Connect UART handle */
     /* mavlink_init(&g_mav, &telem_uart, mavlink_rx_callback); */
 
     for (;;)
     {
-        /* 수신 처리 */
+        /* Process received data */
         mavlink_poll(&g_mav);
 
-        /* 송신: Heartbeat 1Hz (50루프마다) */
+        /* TX: Heartbeat 1Hz (every 50 loops) */
         if (g_mav_counter % 50 == 0)
         {
             mavlink_send_heartbeat(&g_mav,
@@ -251,10 +368,12 @@ static void mavlink_task(void *param)
             mavlink_send_sys_status(&g_mav, 11100, 75, 0);
         }
 
-        /* 송신: Attitude 10Hz (5루프마다) */
+        /* TX: Attitude 10Hz (every 5 loops) */
         if (g_mav_counter % 5 == 0)
         {
-            mavlink_send_attitude(&g_mav, g_roll, g_pitch, g_yaw, 0, 0, 0);
+            float r, p, y;
+            shared_read_euler(&r, &p, &y);
+            mavlink_send_attitude(&g_mav, r, p, y, 0, 0, 0);
         }
 
         g_mav_counter++;
@@ -274,20 +393,22 @@ static void gps_task(void *param)
     (void)param;
     TickType_t last_wake = xTaskGetTickCount();
 
-    /* TODO: ubx_dev_t 초기화 */
+    /* TODO: Initialize ubx_dev_t */
 
     for (;;)
     {
-        /* ubx_poll(&gps_dev); */
-
-        watchdog_feed(WATCHDOG_TASK_GPS);
+        /* Feed only on successful GPS poll */
+        /* if (ubx_poll(&gps_dev) > 0)  */
+        /* {                             */
+        /*     watchdog_feed(WATCHDOG_TASK_GPS); */
+        /* }                             */
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(100));  /* 10Hz */
     }
 }
 
 /* ══════════════════════════════════════════════════════
- *  Log task — 가변 (유휴 시간 활용)
+ *  Log task — variable rate (uses idle time)
  * ══════════════════════════════════════════════════════ */
 
 static void log_task(void *param)
@@ -298,11 +419,13 @@ static void log_task(void *param)
 
     for (;;)
     {
-        /* TODO: 로그 데이터 기록 */
+        /* Feed only on successful log write */
+        /* if (sd_logger_flush() == 0) */
+        /* {                           */
+        /*     watchdog_feed(WATCHDOG_TASK_LOG); */
+        /* }                           */
 
-        watchdog_feed(WATCHDOG_TASK_LOG);
-
-        vTaskDelay(pdMS_TO_TICKS(100));  /* ~10Hz, 정확한 주기 불필요 */
+        vTaskDelay(pdMS_TO_TICKS(100));  /* ~10Hz, exact period not required */
     }
 }
 
@@ -312,10 +435,15 @@ static void log_task(void *param)
 
 void app_main(void)
 {
-    /* 워치독 초기화 */
+    /* Enable DWT cycle counter (used by ahrs_task and control_task for precise dt) */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+    /* Initialize watchdog */
     watchdog_init();
 
-    /* FreeRTOS 태스크 생성 */
+    /* Create FreeRTOS tasks */
     xTaskCreate(sensor_task,   "sensor",   STACK_SENSOR,   NULL, TASK_PRIO_SENSOR,   &sensor_task_handle);
     xTaskCreate(ahrs_task,     "ahrs",     STACK_AHRS,     NULL, TASK_PRIO_AHRS,     &ahrs_task_handle);
     xTaskCreate(control_task,  "control",  STACK_CONTROL,  NULL, TASK_PRIO_CONTROL,  &control_task_handle);
@@ -324,9 +452,9 @@ void app_main(void)
     xTaskCreate(gps_task,      "gps",      STACK_GPS,      NULL, TASK_PRIO_GPS,      &gps_task_handle);
     xTaskCreate(log_task,      "log",      STACK_LOG,      NULL, TASK_PRIO_LOG,      &log_task_handle);
 
-    /* 스케줄러 시작 (여기서 리턴하지 않음) */
+    /* Start scheduler (should never return) */
     vTaskStartScheduler();
 
-    /* 여기 도달하면 스케줄러 시작 실패 */
+    /* Reaching here means scheduler failed to start */
     error_handler_fatal(ERR_SCHEDULER_FAILED);
 }

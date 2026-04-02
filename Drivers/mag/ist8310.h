@@ -34,13 +34,13 @@
 #define IST8310_REG_DATA_Z_MSB 0x08
 
 /* Status */
-#define IST8310_REG_STAT1 0x02 /* DRDY 비트 포함 */
+#define IST8310_REG_STAT1 0x02 /* Contains DRDY bit */
 
 /* Control */
-#define IST8310_REG_CNTL1 0x0A   /* 동작 모드 제어 */
-#define IST8310_REG_CNTL2 0x0B   /* 데이터 출력 설정 */
-#define IST8310_REG_AVGCNTL 0x41 /* 평균 횟수 설정 */
-#define IST8310_REG_PDCNTL 0x42  /* Set/Reset 펄스 지속시간 */
+#define IST8310_REG_CNTL1 0x0A   /* Operating mode control */
+#define IST8310_REG_CNTL2 0x0B   /* Data output config */
+#define IST8310_REG_AVGCNTL 0x41 /* Averaging count setting */
+#define IST8310_REG_PDCNTL 0x42  /* Set/Reset pulse duration */
 
 /* ══════════════════════════════════════════════════════
  *  Register Values / Bit Masks
@@ -49,17 +49,17 @@
 /* WHO_AM_I expected value */
 #define IST8310_WHO_AM_I_VAL 0x10
 
-/* CNTL1: 동작 모드 */
+/* CNTL1: Operating mode */
 #define IST8310_MODE_STANDBY 0x00
-#define IST8310_MODE_SINGLE 0x01 /* 단일 측정 후 자동 대기 */
+#define IST8310_MODE_SINGLE 0x01 /* Auto standby after single measurement */
 
-/* STAT1 비트 */
+/* STAT1 bits */
 #define IST8310_STAT_DRDY 0x01 /* Data Ready */
 
-/* AVGCNTL: 평균 횟수 (노이즈 저감) */
-#define IST8310_AVG_16 0x24 /* 16회 평균, ODR ~166Hz */
+/* AVGCNTL: Averaging count (noise reduction) */
+#define IST8310_AVG_16 0x24 /* 16x averaging, ODR ~166Hz */
 
-/* PDCNTL: Set/Reset 펄스 (저노이즈 모드) */
+/* PDCNTL: Set/Reset pulse (low-noise mode) */
 #define IST8310_PDCNTL_NORMAL 0xC0
 
 /* ══════════════════════════════════════════════════════
@@ -70,7 +70,7 @@
 #define IST8310_SCALE_UT (1.0f / 3.3f)
 
 /* ══════════════════════════════════════════════════════
- *  DRDY 대기 최대 시간
+ *  DRDY max wait time
  * ══════════════════════════════════════════════════════ */
 
 #define IST8310_MEAS_TIMEOUT_MS 10
@@ -97,7 +97,7 @@ int ist8310_init(i2c_dev_t *dev);
  * @param mag  Output: magnetic field in uT (micro-Tesla)
  * @return 0 on success, negative on error
  *
- * Single measurement 모드: 측정 트리거 → DRDY 대기 → 데이터 읽기
+ * Single measurement mode: trigger -> DRDY wait -> data read
  */
 int ist8310_read(i2c_dev_t *dev, vec3f_t *mag);
 

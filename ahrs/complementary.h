@@ -19,7 +19,7 @@
 
 typedef struct
 {
-    float alpha;        /* 자이로 신뢰도 (0.0~1.0, 기본 0.98) */
+    float alpha;        /* gyro trust factor (0.0~1.0, default 0.98) */
 } complementary_config_t;
 
 #define COMPLEMENTARY_DEFAULT_CONFIG { \
@@ -32,11 +32,11 @@ typedef struct
 
 typedef struct
 {
-    quat_t q;           /* 현재 자세 (쿼터니언) */
-    float roll;         /* 현재 roll (rad) — 편의용 */
-    float pitch;        /* 현재 pitch (rad) */
-    float yaw;          /* 현재 yaw (rad) */
-    float alpha;        /* 자이로 신뢰도 */
+    quat_t q;           /* current attitude (quaternion) */
+    float roll;         /* current roll (rad) — convenience */
+    float pitch;        /* current pitch (rad) */
+    float yaw;          /* current yaw (rad) */
+    float alpha;        /* gyro trust factor */
     uint8_t initialized;
 } complementary_state_t;
 
@@ -59,7 +59,7 @@ void complementary_init(complementary_state_t *state, const complementary_config
  * @param mag    Magnetometer reading (uT, NULL if unavailable)
  * @param dt     Time step (seconds)
  *
- * 호출 주기: 센서 ODR에 맞춰 1kHz 권장
+ * Call rate: 1kHz recommended, matching sensor ODR
  */
 void complementary_update(complementary_state_t *state,
                           const vec3f_t *accel,

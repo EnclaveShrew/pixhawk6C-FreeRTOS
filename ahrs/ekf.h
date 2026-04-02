@@ -21,10 +21,10 @@
 
 typedef struct
 {
-    float gyro_noise;       /* 자이로 프로세스 노이즈 (rad/s) */
-    float gyro_bias_noise;  /* 바이어스 드리프트 노이즈 (rad/s²) */
-    float accel_noise;      /* 가속도계 측정 노이즈 (m/s²) */
-    float mag_noise;        /* 자력계 측정 노이즈 (uT) */
+    float gyro_noise;       /* gyro process noise (rad/s) */
+    float gyro_bias_noise;  /* bias drift noise (rad/s^2) */
+    float accel_noise;      /* accelerometer measurement noise (m/s^2) */
+    float mag_noise;        /* magnetometer measurement noise (uT) */
 } ekf_config_t;
 
 #define EKF_DEFAULT_CONFIG { \
@@ -47,7 +47,7 @@ typedef struct
     /* State vector: [q0, q1, q2, q3, bx, by, bz] */
     float x[EKF_STATE_DIM];
 
-    /* Covariance matrix (7x7) — 추정 불확실성 */
+    /* Covariance matrix (7x7) — estimation uncertainty */
     float P[EKF_STATE_DIM][EKF_STATE_DIM];
 
     /* Noise parameters */
@@ -56,7 +56,7 @@ typedef struct
     float accel_noise;
     float mag_noise;
 
-    /* Euler angles (편의용, update 후 갱신) */
+    /* Euler angles (convenience, updated after each step) */
     float roll;
     float pitch;
     float yaw;
@@ -81,7 +81,7 @@ void ekf_init(ekf_state_t *state, const ekf_config_t *cfg);
  * @param gyro   Gyroscope reading (rad/s)
  * @param dt     Time step (seconds)
  *
- * 자이로 각속도로 상태(쿼터니언) 예측 + 공분산 전파
+ * Predict state (quaternion) from gyro angular rate + propagate covariance
  */
 void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt);
 
@@ -90,7 +90,7 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt);
  * @param state  EKF state
  * @param accel  Accelerometer reading (m/s²)
  *
- * 중력 방향으로 roll/pitch 보정
+ * Correct roll/pitch using gravity direction
  */
 void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel);
 
@@ -99,7 +99,7 @@ void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel);
  * @param state  EKF state
  * @param mag    Magnetometer reading (uT)
  *
- * 자기장 방향으로 yaw 보정
+ * Correct yaw using magnetic field direction
  */
 void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag);
 

@@ -98,13 +98,13 @@
  *  Scale factors
  * ══════════════════════════════════════════════════════ */
 
-/* 가속도: raw → m/s² (±16g, 16-bit signed → 2048 LSB/g) */
+/* Accel: raw -> m/s^2 (+/-16g, 16-bit signed -> 2048 LSB/g) */
 #define ICM42688P_ACCEL_SCALE_16G (9.80665f / 2048.0f)
 
-/* 자이로: raw → rad/s (±2000dps, 16-bit signed → 16.4 LSB/dps) */
+/* Gyro: raw -> rad/s (+/-2000dps, 16-bit signed -> 16.4 LSB/dps) */
 #define ICM42688P_GYRO_SCALE_2000DPS (0.01745329252f / 16.4f)
 
-/* 온도: raw → °C */
+/* Temperature: raw -> deg C */
 #define ICM42688P_TEMP_SCALE (1.0f / 132.48f)
 #define ICM42688P_TEMP_OFFSET 25.0f
 
@@ -120,7 +120,7 @@ typedef struct
     uint8_t gyro_odr;  /* GYRO_ODR_xxKHZ */
 } icm42688p_config_t;
 
-/* 기본 설정: ±16g, ±2000dps, 1kHz */
+/* Default config: ±16g, ±2000dps, 1kHz */
 #define ICM42688P_DEFAULT_CONFIG                                                                                       \
     {                                                                                                                  \
         .accel_fs = ICM42688P_ACCEL_FS_16G,                                                                            \

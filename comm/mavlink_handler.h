@@ -2,14 +2,14 @@
  * @file mavlink_handler.h
  * @brief MAVLink v2 protocol handler
  *
- * MAVLink v2 패킷 구조:
+ * MAVLink v2 packet structure:
  *   [STX 0xFD] [LEN] [INC_FLAGS] [CMP_FLAGS] [SEQ] [SYS_ID] [COMP_ID]
  *   [MSG_ID_L] [MSG_ID_M] [MSG_ID_H] [PAYLOAD...] [CRC_L] [CRC_H]
  *
- * 지원 메시지:
- *   송신: HEARTBEAT(0), ATTITUDE(30), GPS_RAW_INT(24), SYS_STATUS(1)
- *   수신: COMMAND_LONG(76), PARAM_SET(23)
- *   커스텀: CONTROLLER_SWITCH(150000), CONTROLLER_STATUS(150001)
+ * Supported messages:
+ *   TX: HEARTBEAT(0), ATTITUDE(30), GPS_RAW_INT(24), SYS_STATUS(1)
+ *   RX: COMMAND_LONG(76), PARAM_SET(23)
+ *   Custom: CONTROLLER_SWITCH(150000), CONTROLLER_STATUS(150001)
  */
 
 #ifndef MAVLINK_HANDLER_H
@@ -108,11 +108,12 @@ typedef struct
     mavlink_message_t rx_msg;
     uint8_t rx_payload_idx;
     uint16_t rx_crc;
+    uint32_t rx_start_tick;     /* Tick when parsing started (timeout detection) */
 
     /* TX sequence counter */
     uint8_t tx_seq;
 
-    /* Callback: 수신된 메시지 처리 */
+    /* Callback: handle received messages */
     void (*on_message)(const mavlink_message_t *msg);
 } mavlink_handler_t;
 

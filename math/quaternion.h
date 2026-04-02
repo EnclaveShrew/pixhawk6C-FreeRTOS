@@ -2,8 +2,8 @@
  * @file quaternion.h
  * @brief Quaternion math utilities for attitude representation
  *
- * AHRS, EKF, 제어기 등에서 공통으로 사용하는 쿼터니언 연산.
- * ZYX 오일러 각도 순서 (yaw → pitch → roll).
+ * Quaternion operations shared by AHRS, EKF, controllers, etc.
+ * ZYX Euler angle order (yaw -> pitch -> roll).
  */
 
 #ifndef QUATERNION_H
@@ -23,7 +23,7 @@ void quat_normalize(quat_t *q);
  * @param b  Second quaternion
  * @return Product quaternion
  *
- * 두 회전의 합성. 교환법칙 성립하지 않음 (a*b ≠ b*a)
+ * Composition of two rotations. Not commutative (a*b != b*a)
  */
 quat_t quat_multiply(const quat_t *a, const quat_t *b);
 
@@ -44,5 +44,17 @@ void quat_to_euler(const quat_t *q, float *roll, float *pitch, float *yaw);
  * @return Quaternion
  */
 quat_t euler_to_quat(float roll, float pitch, float yaw);
+
+/**
+ * @brief Compute attitude error vector between two quaternions
+ * @param target   Target attitude
+ * @param current  Current attitude
+ * @param error    Output: error vector [roll, pitch, yaw] (rad)
+ *
+ * q_err = q_current^(-1) * q_target
+ * error = 2 * sign(q_err.w) * [q_err.x, q_err.y, q_err.z]
+ * Sign flip ensures shortest rotation path.
+ */
+void quat_attitude_error(const quat_t *target, const quat_t *current, vec3f_t *error);
 
 #endif /* QUATERNION_H */

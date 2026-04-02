@@ -2,34 +2,34 @@
  * @file ms5611.c
  * @brief MS5611 barometric pressure sensor driver implementation
  *
- * 데이터시트: MS5611-01BA03 (TE Connectivity)
- * I2C, 24-bit ADC, 공장 교정 PROM 포함
+ * Datasheet: MS5611-01BA03 (TE Connectivity)
+ * I2C, 24-bit ADC, includes factory-calibrated PROM
  *
- * MS5611은 일반적인 레지스터 R/W 방식이 아니라,
- * 커맨드 전송 → 변환 대기 → ADC 읽기 방식으로 동작.
+ * MS5611 does not use typical register R/W;
+ * it works via command send -> conversion wait -> ADC read.
  */
 
 #include "ms5611.h"
 #include "stm32h7xx_hal.h"
 
-/* ── OSR별 변환 커맨드 및 대기 시간 ────────────────── */
+/* ── Conversion commands and wait times by OSR ────────────────── */
 
-/* D1(기압) 변환 커맨드 테이블 */
+/* D1 (pressure) conversion command table */
 static const uint8_t d1_cmd[] = {
     MS5611_CMD_CONV_D1_256,  MS5611_CMD_CONV_D1_512,  MS5611_CMD_CONV_D1_1024,
     MS5611_CMD_CONV_D1_2048, MS5611_CMD_CONV_D1_4096,
 };
 
-/* D2(온도) 변환 커맨드 테이블 */
+/* D2 (temperature) conversion command table */
 static const uint8_t d2_cmd[] = {
     MS5611_CMD_CONV_D2_256,  MS5611_CMD_CONV_D2_512,  MS5611_CMD_CONV_D2_1024,
     MS5611_CMD_CONV_D2_2048, MS5611_CMD_CONV_D2_4096,
 };
 
-/* 변환 대기 시간 (ms), OSR 인덱스 순 */
+/* Conversion wait time (ms), by OSR index */
 static const uint8_t conv_delay_ms[] = {1, 2, 3, 5, 10};
 
-/* ── 내부 함수: 커맨드 전송 ────────────────────────── */
+/* ── Internal: send command ────────────────────────── */
 
 static int ms5611_send_cmd(ms5611_dev_t *dev, uint8_t cmd)
 {
@@ -38,7 +38,7 @@ static int ms5611_send_cmd(ms5611_dev_t *dev, uint8_t cmd)
     return (status == HAL_OK) ? 0 : -1;
 }
 
-/* ── 내부 함수: ADC 읽기 (24-bit) ──────────────────── */
+/* ── Internal: read ADC (24-bit) ──────────────────── */
 
 static int ms5611_read_adc(ms5611_dev_t *dev, uint32_t *adc_val)
 {
@@ -61,7 +61,7 @@ static int ms5611_read_adc(ms5611_dev_t *dev, uint32_t *adc_val)
     return 0;
 }
 
-/* ── 내부 함수: PROM 읽기 (16-bit) ─────────────────── */
+/* ── Internal: read PROM (16-bit) ─────────────────── */
 
 static int ms5611_read_prom(ms5611_dev_t *dev, uint8_t cmd, uint16_t *val)
 {
@@ -83,7 +83,7 @@ static int ms5611_read_prom(ms5611_dev_t *dev, uint8_t cmd, uint16_t *val)
     return 0;
 }
 
-/* ── 초기화 ─────────────────────────────────────────── */
+/* ── Initialization ─────────────────────────────────────────── */
 
 int ms5611_init(ms5611_dev_t *dev, ms5611_osr_t osr)
 {
@@ -94,9 +94,9 @@ int ms5611_init(ms5611_dev_t *dev, ms5611_osr_t osr)
     {
         return SENSOR_ERR_COMM;
     }
-    HAL_Delay(3); /* 데이터시트: reset 후 reload 시간 */
+    HAL_Delay(3); /* Datasheet: reload time after reset */
 
-    /* 2. PROM 교정 계수 읽기 (C1~C6) */
+    /* 2. Read PROM calibration coefficients (C1~C6) */
     if (ms5611_read_prom(dev, MS5611_CMD_PROM_C1, &dev->c1) < 0 ||
         ms5611_read_prom(dev, MS5611_CMD_PROM_C2, &dev->c2) < 0 ||
         ms5611_read_prom(dev, MS5611_CMD_PROM_C3, &dev->c3) < 0 ||
@@ -107,7 +107,7 @@ int ms5611_init(ms5611_dev_t *dev, ms5611_osr_t osr)
         return SENSOR_ERR_COMM;
     }
 
-    /* 3. PROM 유효성 검증: 모두 0이거나 모두 0xFFFF면 통신 실패 */
+    /* 3. PROM validity: all zeros or all 0xFFFF means comm failure */
     if ((dev->c1 == 0 && dev->c2 == 0 && dev->c3 == 0) || (dev->c1 == 0xFFFF && dev->c2 == 0xFFFF))
     {
         return SENSOR_ERR_ID;
@@ -116,14 +116,14 @@ int ms5611_init(ms5611_dev_t *dev, ms5611_osr_t osr)
     return SENSOR_OK;
 }
 
-/* ── 온도 + 기압 읽기 (2nd order compensation) ──────── */
+/* ── Temperature + pressure read (2nd order compensation) ──────── */
 
 int ms5611_read(ms5611_dev_t *dev, float *temp_c, float *press_pa)
 {
     uint32_t d1 = 0; /* raw pressure */
     uint32_t d2 = 0; /* raw temperature */
 
-    /* 1. 온도 변환 시작 → 대기 → ADC 읽기 */
+    /* 1. Start temperature conversion -> wait -> ADC read */
     if (ms5611_send_cmd(dev, d2_cmd[dev->osr]) < 0)
     {
         return SENSOR_ERR_COMM;
@@ -135,7 +135,7 @@ int ms5611_read(ms5611_dev_t *dev, float *temp_c, float *press_pa)
         return SENSOR_ERR_COMM;
     }
 
-    /* 2. 기압 변환 시작 → 대기 → ADC 읽기 */
+    /* 2. Start pressure conversion -> wait -> ADC read */
     if (ms5611_send_cmd(dev, d1_cmd[dev->osr]) < 0)
     {
         return SENSOR_ERR_COMM;
@@ -150,18 +150,18 @@ int ms5611_read(ms5611_dev_t *dev, float *temp_c, float *press_pa)
     /*
      * 3. 2nd order temperature compensation
      *
-     * 데이터시트 공식 (정수 연산):
+     * Datasheet formula (integer arithmetic):
      * dT = D2 - C5 * 2^8
      * TEMP = 2000 + dT * C6 / 2^23
      * OFF  = C2 * 2^16 + (C4 * dT) / 2^7
      * SENS = C1 * 2^15 + (C3 * dT) / 2^8
      *
-     * 2nd order (TEMP < 20°C):
+     * 2nd order (TEMP < 20 deg C):
      *   T2    = dT^2 / 2^31
      *   OFF2  = 5 * (TEMP-2000)^2 / 2
      *   SENS2 = 5 * (TEMP-2000)^2 / 4
      *
-     * 극저온 (TEMP < -15°C):
+     * Very low temp (TEMP < -15 deg C):
      *   OFF2  += 7 * (TEMP+1500)^2
      *   SENS2 += 11 * (TEMP+1500)^2 / 2
      */
@@ -180,7 +180,7 @@ int ms5611_read(ms5611_dev_t *dev, float *temp_c, float *press_pa)
         int64_t OFF2 = 5 * TEMP2 * TEMP2 / 2;
         int64_t SENS2 = 5 * TEMP2 * TEMP2 / 4;
 
-        /* 극저온 보상 */
+        /* Very low temperature compensation */
         if (TEMP < -1500)
         {
             int64_t TEMP3 = TEMP + 1500;
@@ -193,17 +193,17 @@ int ms5611_read(ms5611_dev_t *dev, float *temp_c, float *press_pa)
         SENS -= SENS2;
     }
 
-    /* 4. 최종 기압 계산 */
+    /* 4. Final pressure calculation */
     int64_t P = ((int64_t)d1 * SENS / (1LL << 21) - OFF) / (1LL << 15);
 
-    /* TEMP: 1/100 °C 단위, P: 1/100 mbar 단위 → 변환 */
+    /* TEMP: in 1/100 deg C, P: in 1/100 mbar -> convert */
     if (temp_c != NULL)
     {
         *temp_c = (float)TEMP / 100.0f;
     }
     if (press_pa != NULL)
     {
-        *press_pa = (float)P; /* 단위: Pa (= 1/100 mbar * 100) */
+        *press_pa = (float)P; /* Units: Pa (= 1/100 mbar * 100) */
     }
 
     return SENSOR_OK;

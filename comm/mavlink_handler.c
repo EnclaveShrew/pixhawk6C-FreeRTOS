@@ -2,11 +2,12 @@
  * @file mavlink_handler.c
  * @brief MAVLink v2 protocol handler implementation
  *
- * MAVLink v2 CRC: CRC-16/MCRF4XX + CRC_EXTRA (메시지별 시드)
- * 직접 구현하여 외부 MAVLink 라이브러리에 의존하지 않음.
+ * MAVLink v2 CRC: CRC-16/MCRF4XX + CRC_EXTRA (per-message seed)
+ * Implemented directly without external MAVLink library dependency.
  */
 
 #include "mavlink_handler.h"
+#include "stm32h7xx_hal.h"
 #include <string.h>
 #include <stddef.h>
 
@@ -34,10 +35,20 @@ static void crc_accumulate_buf(uint16_t *crc, const uint8_t *buf, uint16_t len)
 }
 
 /*
- * CRC_EXTRA: 각 메시지의 필드 정의 해시.
- * 송수신 양쪽이 같은 메시지 구조를 쓰는지 검증.
- * 여기서는 사용하는 메시지만 정의.
+ * CRC_EXTRA: hash of each message's field definitions.
+ * Verifies both sides use the same message structure.
+ * Only messages used in this project are defined here.
  */
+/*
+ * CRC_EXTRA for custom messages:
+ *   Computed from field type+name per MAVLink spec.
+ *   CTRL_SWITCH (150000): uint8_t target_type -> 0xBE (190)
+ *   CTRL_STATUS (150001): float roll_output, float pitch_output,
+ *                          float yaw_output, uint8_t ctrl_type -> 0x4D (77)
+ */
+#define CRC_EXTRA_CTRL_SWITCH   190
+#define CRC_EXTRA_CTRL_STATUS   77
+
 static uint8_t mavlink_get_crc_extra(uint32_t msg_id)
 {
     switch (msg_id)
@@ -49,11 +60,13 @@ static uint8_t mavlink_get_crc_extra(uint32_t msg_id)
     case MAVLINK_MSG_COMMAND_LONG:   return 152;
     case MAVLINK_MSG_COMMAND_ACK:    return 143;
     case MAVLINK_MSG_PARAM_SET:      return 168;
+    case MAVLINK_MSG_CTRL_SWITCH:    return CRC_EXTRA_CTRL_SWITCH;
+    case MAVLINK_MSG_CTRL_STATUS:    return CRC_EXTRA_CTRL_STATUS;
     default:                         return 0;
     }
 }
 
-/* ── 내부: 패킷 전송 ──────────────────────────────── */
+/* ── Internal: send packet ────────────────────────── */
 
 static int mavlink_send_packet(mavlink_handler_t *mav, uint32_t msg_id,
                                const uint8_t *payload, uint8_t payload_len)
@@ -97,7 +110,7 @@ static int mavlink_send_packet(mavlink_handler_t *mav, uint32_t msg_id,
     return 0;
 }
 
-/* ── 내부: little-endian 헬퍼 ──────────────────────── */
+/* ── Internal: little-endian helpers ───────────────── */
 
 static void put_float(uint8_t *buf, float val)
 {
@@ -123,7 +136,7 @@ static void put_u16(uint8_t *buf, uint16_t val)
     buf[1] = (uint8_t)(val >> 8);
 }
 
-/* ── 초기화 ─────────────────────────────────────────── */
+/* ── Initialization ─────────────────────────────────── */
 
 int mavlink_init(mavlink_handler_t *mav, uart_dev_t *uart_dev,
                  void (*on_message)(const mavlink_message_t *msg))
@@ -135,10 +148,22 @@ int mavlink_init(mavlink_handler_t *mav, uart_dev_t *uart_dev,
     return 0;
 }
 
-/* ── 바이트 단위 파서 ──────────────────────────────── */
+/* ── Byte-level parser ─────────────────────────────── */
+
+#define MAVLINK_PARSE_TIMEOUT_MS  200
 
 static int mavlink_parse_byte(mavlink_handler_t *mav, uint8_t byte)
 {
+    /* Timeout: if mid-packet and no byte for too long, reset parser */
+    if (mav->parse_state != MAV_STATE_WAIT_STX)
+    {
+        uint32_t now = HAL_GetTick();
+        if ((now - mav->rx_start_tick) > MAVLINK_PARSE_TIMEOUT_MS)
+        {
+            mav->parse_state = MAV_STATE_WAIT_STX;
+        }
+    }
+
     switch (mav->parse_state)
     {
     case MAV_STATE_WAIT_STX:
@@ -146,6 +171,7 @@ static int mavlink_parse_byte(mavlink_handler_t *mav, uint8_t byte)
         {
             mav->parse_state = MAV_STATE_LEN;
             crc_init(&mav->rx_crc);
+            mav->rx_start_tick = HAL_GetTick();
         }
         break;
 
@@ -202,7 +228,7 @@ static int mavlink_parse_byte(mavlink_handler_t *mav, uint8_t byte)
 
         if (mav->rx_msg.payload_len == 0)
         {
-            /* CRC_EXTRA 누적 후 CRC 검증으로 */
+            /* Accumulate CRC_EXTRA then proceed to CRC verification */
             crc_accumulate(&mav->rx_crc, mavlink_get_crc_extra(mav->rx_msg.msg_id));
             mav->parse_state = MAV_STATE_CRC_L;
         }
@@ -242,7 +268,7 @@ static int mavlink_parse_byte(mavlink_handler_t *mav, uint8_t byte)
         mav->parse_state = MAV_STATE_WAIT_STX;
         if (byte == (uint8_t)(mav->rx_crc >> 8))
         {
-            /* CRC 통과 — 메시지 처리 */
+            /* CRC passed — process message */
             if (mav->on_message != NULL)
             {
                 mav->on_message(&mav->rx_msg);
@@ -255,7 +281,7 @@ static int mavlink_parse_byte(mavlink_handler_t *mav, uint8_t byte)
     return 0;
 }
 
-/* ── 폴링 수신 ─────────────────────────────────────── */
+/* ── Polling receive ───────────────────────────────── */
 
 int mavlink_poll(mavlink_handler_t *mav)
 {
@@ -305,8 +331,8 @@ int mavlink_send_attitude(mavlink_handler_t *mav,
     uint8_t payload[28];
     memset(payload, 0, sizeof(payload));
 
-    /* time_boot_ms (4 bytes) — 0으로 두거나 실제 uptime */
-    put_u32(&payload[0], 0);
+    /* time_boot_ms (4 bytes) — QGC uses this for graph time axis */
+    put_u32(&payload[0], HAL_GetTick());
     /* roll, pitch, yaw (rad) */
     put_float(&payload[4], roll);
     put_float(&payload[8], pitch);
@@ -335,7 +361,7 @@ int mavlink_send_gps_raw(mavlink_handler_t *mav,
     put_i32(&payload[12], lon);
     /* alt (mm, AMSL) */
     put_i32(&payload[16], alt);
-    /* eph (cm) — h_acc를 mm에서 cm로 변환 */
+    /* eph (cm) — convert h_acc from mm to cm */
     put_u16(&payload[20], (uint16_t)(h_acc / 10));
     /* epv (cm) */
     put_u16(&payload[22], (uint16_t)(v_acc / 10));
@@ -360,12 +386,12 @@ int mavlink_send_sys_status(mavlink_handler_t *mav,
     uint8_t payload[31];
     memset(payload, 0, sizeof(payload));
 
-    /* sensors present/enabled/health (12 bytes) — 전부 0 */
+    /* sensors present/enabled/health (12 bytes) — all zeros */
     /* load (permille) */
     put_u16(&payload[12], cpu_load);
     /* voltage_battery (mV) */
     put_u16(&payload[14], battery_mv);
-    /* current_battery (cA) — 미구현 */
+    /* current_battery (cA) — not implemented */
     put_u16(&payload[16], 0);
     /* battery_remaining (%) */
     payload[30] = (uint8_t)battery_pct;

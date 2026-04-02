@@ -3,8 +3,8 @@
  * @brief Watchdog timer implementation
  *
  * IWDG (Independent Watchdog):
- *   LSI 클럭(32kHz)으로 구동, 메인 클럭과 독립.
- *   타임아웃 내에 리프레시하지 않으면 MCU 리셋.
+ *   Driven by LSI (32kHz), independent of main clock.
+ *   MCU resets if not refreshed within timeout.
  */
 
 #include "watchdog.h"
@@ -12,11 +12,11 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-/* ── IWDG 핸들 ─────────────────────────────────────── */
+/* ── IWDG handle ─────────────────────────────────────── */
 
 static IWDG_HandleTypeDef hiwdg;
 
-/* ── 태스크 헬스 플래그 ────────────────────────────── */
+/* ── Task health flags ────────────────────────────── */
 
 static volatile uint8_t task_alive[WATCHDOG_TASK_COUNT];
 
@@ -24,20 +24,20 @@ static volatile uint8_t task_alive[WATCHDOG_TASK_COUNT];
 
 void watchdog_init(void)
 {
-    /* 모든 플래그 초기화 */
+    /* Reset all flags */
     for (int i = 0; i < WATCHDOG_TASK_COUNT; i++)
     {
         task_alive[i] = 0;
     }
 
     /*
-     * IWDG 설정:
+     * IWDG Configuration:
      * LSI = 32kHz
-     * Prescaler = 32 → IWDG 클럭 = 32000/32 = 1000 Hz
-     * Reload = 500 → 타임아웃 = 500ms
+     * Prescaler = 32 → IWDG clock = 32000/32 = 1000 Hz
+     * Reload = 500 → timeout = 500ms
      *
-     * 감시 태스크가 100ms(10Hz)마다 리프레시하므로
-     * 500ms 타임아웃은 충분한 여유.
+     * Monitor task refreshes every 100ms (10Hz), so
+     * 500ms timeout provides sufficient margin.
      */
     hiwdg.Instance = IWDG1;
     hiwdg.Init.Prescaler = IWDG_PRESCALER_32;
@@ -62,29 +62,31 @@ void watchdog_task_func(void *param)
 
     for (;;)
     {
-        /* 모든 태스크가 살아있는지 확인 */
-        uint8_t all_alive = 1;
-        for (int i = 0; i < WATCHDOG_TASK_COUNT; i++)
+        /*
+         * Only critical tasks (sensor, ahrs, control) checked for reset.
+         * Optional tasks (mavlink, gps, log) do not trigger reset.
+         * GPS not getting fix indoors is normal; logging failure should not reset.
+         */
+        uint8_t critical_alive = 1;
+        for (int i = 0; i < WATCHDOG_CRITICAL_COUNT; i++)
         {
             if (!task_alive[i])
             {
-                all_alive = 0;
+                critical_alive = 0;
                 break;
             }
         }
 
-        if (all_alive)
+        if (critical_alive)
         {
-            /* 모두 살아있으면 IWDG 리프레시 */
             HAL_IWDG_Refresh(&hiwdg);
-
-            /* 플래그 초기화 (다음 주기에 다시 확인) */
-            for (int i = 0; i < WATCHDOG_TASK_COUNT; i++)
-            {
-                task_alive[i] = 0;
-            }
         }
-        /* all_alive == 0이면 리프레시 안 함 → 타임아웃 시 리셋 */
+
+        /* Reset all flags (both critical and optional) */
+        for (int i = 0; i < WATCHDOG_TASK_COUNT; i++)
+        {
+            task_alive[i] = 0;
+        }
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(100));  /* 10Hz */
     }

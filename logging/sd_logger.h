@@ -2,8 +2,8 @@
  * @file sd_logger.h
  * @brief SD card logging system
  *
- * 비행 데이터를 SD카드에 바이너리 포맷으로 기록.
- * FatFS 기반, 로그 태스크에서 호출.
+ * Records flight data to SD card in binary format.
+ * Based on FatFS, called from log task.
  */
 
 #ifndef SD_LOGGER_H
@@ -27,14 +27,14 @@ typedef enum
 } log_type_t;
 
 /* ══════════════════════════════════════════════════════
- *  Log entry header (모든 엔트리 공통)
+ *  Log entry header (Common to all entries)
  * ══════════════════════════════════════════════════════ */
 
 typedef struct
 {
-    uint32_t timestamp_ms;  /* 부팅 후 경과 시간 */
+    uint32_t timestamp_ms;  /* Elapsed time since boot */
     uint8_t type;           /* log_type_t */
-    uint8_t len;            /* payload 길이 */
+    uint8_t len;            /* Payload length */
 } __attribute__((packed)) log_header_t;
 
 /* ══════════════════════════════════════════════════════
@@ -82,7 +82,7 @@ typedef struct
  * @brief Initialize SD card and create log file
  * @return 0 on success, negative on error
  *
- * 파일명: LOG_XXXX.bin (자동 번호 증가)
+ * Filename: LOG_XXXX.bin (auto-incrementing number)
  */
 int sd_logger_init(void);
 
@@ -93,8 +93,8 @@ int sd_logger_init(void);
  * @param len      Payload length
  * @return 0 on success, negative on error
  *
- * header(6 bytes) + payload를 버퍼에 기록.
- * 버퍼가 차면 SD카드에 flush.
+ * header(6 bytes) + payload written to buffer.
+ * flush to SD card when buffer is full.
  */
 int sd_logger_write(log_type_t type, const void *payload, uint8_t len);
 

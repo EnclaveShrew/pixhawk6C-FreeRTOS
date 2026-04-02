@@ -2,17 +2,17 @@
  * @file ekf.c
  * @brief Extended Kalman Filter implementation for attitude estimation
  *
- * EKF 사이클 (매 루프):
- *   1. Predict: 자이로로 상태 예측 + 공분산 전파
- *   2. Update (accel): 중력 방향으로 roll/pitch 보정
- *   3. Update (mag):   자기장 방향으로 yaw 보정
+ * EKF cycle (each loop):
+ *   1. Predict: predict state from gyro + propagate covariance
+ *   2. Update (accel): correct roll/pitch using gravity direction
+ *   3. Update (mag):   correct yaw using magnetic field direction
  *
  * State: [q0, q1, q2, q3, bx, by, bz]
- *   q = 자세 쿼터니언
- *   b = 자이로 바이어스 (자동 추정됨)
+ *   q = attitude quaternion
+ *   b = gyro bias (estimated automatically)
  *
- * 자이로 입력에서 바이어스를 빼서 예측:
- *   ω_corrected = ω_measured - bias
+ * Prediction subtracts bias from gyro input:
+ *   w_corrected = w_measured - bias
  */
 
 #include "ekf.h"
@@ -21,10 +21,16 @@
 #include <string.h>
 #include <stddef.h>
 
-/* ── 행렬 유틸리티 (7x7 고정 크기) ─────────────────── */
+/* ── EKF tuning constants ──────────────────────────── */
+
+#define EKF_BIAS_MAX    0.2f        /* gyro bias bound (rad/s) */
+#define GRAVITY         9.80665f    /* standard gravity (m/s^2) */
+#define ACCEL_GATE_G    5.0f        /* accel update gate (~0.5g, PX4 reference) */
+
+/* ── Matrix utilities (7x7 fixed size) ─────────────── */
 
 /**
- * @brief 7x7 행렬 덧셈: C = A + B
+ * @brief 7x7 matrix addition: C = A + B
  */
 static void mat7_add(float C[7][7], const float A[7][7], const float B[7][7])
 {
@@ -38,7 +44,7 @@ static void mat7_add(float C[7][7], const float A[7][7], const float B[7][7])
 }
 
 /**
- * @brief 7x7 행렬 곱셈: C = A * B
+ * @brief 7x7 matrix multiplication: C = A * B
  */
 static void mat7_mul(float C[7][7], const float A[7][7], const float B[7][7])
 {
@@ -58,7 +64,7 @@ static void mat7_mul(float C[7][7], const float A[7][7], const float B[7][7])
 }
 
 /**
- * @brief 7x7 전치행렬: B = A^T
+ * @brief 7x7 matrix transpose: B = A^T
  */
 static void mat7_transpose(float B[7][7], const float A[7][7])
 {
@@ -71,10 +77,10 @@ static void mat7_transpose(float B[7][7], const float A[7][7])
     }
 }
 
-/* ── 소규모 행렬 (측정 업데이트용) ─────────────────── */
+/* ── Small matrix ops (for measurement update) ─────── */
 
 /**
- * @brief 3x3 행렬 역행렬 (Cramer's rule)
+ * @brief 3x3 matrix inverse (Cramer's rule)
  * @return 0 on success, -1 if singular
  */
 static int mat3_inverse(float out[3][3], const float in[3][3])
@@ -103,7 +109,7 @@ static int mat3_inverse(float out[3][3], const float in[3][3])
     return 0;
 }
 
-/* ── 쿼터니언 정규화 (state 내부) ──────────────────── */
+/* ── Quaternion normalization (internal state) ─────── */
 
 static void ekf_normalize_quat(ekf_state_t *state)
 {
@@ -120,7 +126,7 @@ static void ekf_normalize_quat(ekf_state_t *state)
     state->x[3] *= inv;
 }
 
-/* ── 오일러 각도 갱신 ──────────────────────────────── */
+/* ── Update euler angles ──────────────────────────── */
 
 static void ekf_update_euler(ekf_state_t *state)
 {
@@ -128,7 +134,7 @@ static void ekf_update_euler(ekf_state_t *state)
     quat_to_euler(&q, &state->roll, &state->pitch, &state->yaw);
 }
 
-/* ── 초기화 ─────────────────────────────────────────── */
+/* ── Initialization ─────────────────────────────────── */
 
 void ekf_init(ekf_state_t *state, const ekf_config_t *cfg)
 {
@@ -140,17 +146,17 @@ void ekf_init(ekf_state_t *state, const ekf_config_t *cfg)
 
     memset(state, 0, sizeof(ekf_state_t));
 
-    /* 초기 쿼터니언: 항등 (회전 없음) */
+    /* Initial quaternion: identity (no rotation) */
     state->x[0] = 1.0f;
 
-    /* 초기 공분산: 대각 행렬 (초기 불확실성) */
+    /* Initial covariance: diagonal matrix (initial uncertainty) */
     for (int i = 0; i < 4; i++)
     {
-        state->P[i][i] = 0.1f;     /* 쿼터니언 불확실성 */
+        state->P[i][i] = 0.1f;     /* quaternion uncertainty */
     }
     for (int i = 4; i < 7; i++)
     {
-        state->P[i][i] = 0.01f;    /* 바이어스 불확실성 */
+        state->P[i][i] = 0.01f;    /* bias uncertainty */
     }
 
     state->gyro_noise = cfg->gyro_noise;
@@ -167,16 +173,16 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt)
     float q0 = state->x[0], q1 = state->x[1];
     float q2 = state->x[2], q3 = state->x[3];
 
-    /* 자이로에서 바이어스 제거 */
+    /* Remove bias from gyro */
     float wx = gyro->x - state->x[4];
     float wy = gyro->y - state->x[5];
     float wz = gyro->z - state->x[6];
 
     /*
-     * 쿼터니언 미분 방정식:
-     * q_dot = 0.5 * q ⊗ [0, wx, wy, wz]
+     * Quaternion differential equation:
+     * q_dot = 0.5 * q (x) [0, wx, wy, wz]
      *
-     * 1차 오일러 적분: q_new = q + q_dot * dt
+     * First-order Euler integration: q_new = q + q_dot * dt
      */
     float half_dt = 0.5f * dt;
     state->x[0] += (-q1 * wx - q2 * wy - q3 * wz) * half_dt;
@@ -184,22 +190,22 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt)
     state->x[2] += ( q0 * wy - q1 * wz + q3 * wx) * half_dt;
     state->x[3] += ( q0 * wz + q1 * wy - q2 * wx) * half_dt;
 
-    /* 바이어스는 변하지 않는다고 가정 (random walk) */
-    /* state->x[4..6] 유지 */
+    /* Bias assumed constant (random walk model) */
+    /* state->x[4..6] unchanged */
 
     ekf_normalize_quat(state);
 
     /*
-     * 상태 전이 야코비안 F (7x7)
-     * F = ∂f/∂x
+     * State transition Jacobian F (7x7)
+     * F = df/dx
      *
-     * 쿼터니언 부분: 자이로 각속도에 의한 회전
-     * 바이어스 부분: 항등 (변화 없음)
+     * Quaternion part: rotation due to gyro angular rate
+     * Bias part: identity (no change)
      */
     float F[7][7];
     memset(F, 0, sizeof(F));
 
-    /* 쿼터니언 → 쿼터니언 (상위 4x4) */
+    /* Quaternion -> Quaternion (upper 4x4) */
     F[0][0] = 1.0f;
     F[0][1] = -half_dt * wx;
     F[0][2] = -half_dt * wy;
@@ -217,7 +223,7 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt)
     F[3][2] = -half_dt * wx;
     F[3][3] = 1.0f;
 
-    /* 쿼터니언 → 바이어스 (4x3) */
+    /* Quaternion -> Bias (4x3) */
     F[0][4] =  half_dt * q1;
     F[0][5] =  half_dt * q2;
     F[0][6] =  half_dt * q3;
@@ -231,13 +237,13 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt)
     F[3][5] = -half_dt * q1;
     F[3][6] = -half_dt * q0;
 
-    /* 바이어스 → 바이어스 (3x3 항등) */
+    /* Bias -> Bias (3x3 identity) */
     F[4][4] = 1.0f;
     F[5][5] = 1.0f;
     F[6][6] = 1.0f;
 
     /*
-     * 프로세스 노이즈 Q (7x7 대각)
+     * Process noise Q (7x7 diagonal)
      */
     float Q[7][7];
     memset(Q, 0, sizeof(Q));
@@ -247,7 +253,7 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt)
     Q[4][4] = bn2; Q[5][5] = bn2; Q[6][6] = bn2;
 
     /*
-     * 공분산 전파: P = F * P * F^T + Q
+     * Covariance propagation: P = F * P * F^T + Q
      */
     float Ft[7][7];
     float FP[7][7];
@@ -257,6 +263,23 @@ void ekf_predict(ekf_state_t *state, const vec3f_t *gyro, float dt)
     mat7_mul(state->P, FP, Ft);
     mat7_add(state->P, state->P, Q);
 
+    /*
+     * Bound gyro bias estimates to prevent divergence.
+     * Typical gyro bias is < 0.1 rad/s (~5.7 deg/s).
+     * If estimated bias exceeds this, something is wrong.
+     */
+    for (int i = 4; i < 7; i++)
+    {
+        if (state->x[i] > EKF_BIAS_MAX)   state->x[i] = EKF_BIAS_MAX;
+        if (state->x[i] < -EKF_BIAS_MAX)  state->x[i] = -EKF_BIAS_MAX;
+    }
+
+    /*
+     * Update euler after predict: needed because accel gate may skip
+     * update_accel for multiple frames during maneuvers.
+     * Without this, g_roll/g_pitch/g_yaw would freeze.
+     * Cost: ~6 trig calls per frame, negligible at 480MHz.
+     */
     ekf_update_euler(state);
 }
 
@@ -267,33 +290,42 @@ void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel)
     float q0 = state->x[0], q1 = state->x[1];
     float q2 = state->x[2], q3 = state->x[3];
 
-    /* 가속도 벡터 정규화 (중력 방향만 추출) */
+    /*
+     * Dynamic acceleration gate (PX4-style):
+     * Skip accel update if |accel_magnitude - gravity| > threshold.
+     * During maneuvers, accel != gravity, so using it would corrupt roll/pitch.
+     */
     float anorm = sqrtf(accel->x * accel->x + accel->y * accel->y + accel->z * accel->z);
     if (anorm < 1e-6f)
     {
         return;
     }
+    if (fabsf(anorm - GRAVITY) > ACCEL_GATE_G)
+    {
+        return;  /* Not free-fall/static — accel is not purely gravity */
+    }
+
     float ax = accel->x / anorm;
     float ay = accel->y / anorm;
     float az = accel->z / anorm;
 
     /*
-     * 예측 중력 방향 (쿼터니언으로 [0,0,1]을 회전체 좌표로 변환)
+     * Predicted gravity direction (transform [0,0,1] to body frame via quaternion)
      * h = R^T * [0, 0, 1]
      */
     float hx = 2.0f * (q1 * q3 - q0 * q2);
     float hy = 2.0f * (q2 * q3 + q0 * q1);
     float hz = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3;
 
-    /* 잔차 (innovation): z - h(x) */
+    /* Residual (innovation): z - h(x) */
     float y[3];
     y[0] = ax - hx;
     y[1] = ay - hy;
     y[2] = az - hz;
 
     /*
-     * 측정 야코비안 H (3x7)
-     * H = ∂h/∂x (중력 벡터의 쿼터니언 편미분)
+     * Measurement Jacobian H (3x7)
+     * H = dh/dx (partial derivatives of gravity vector w.r.t. quaternion)
      */
     float H[3][7];
     memset(H, 0, sizeof(H));
@@ -306,7 +338,7 @@ void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel)
     H[2][2] = -2.0f * q2;  H[2][3] =  2.0f * q3;
 
     /*
-     * 칼만 게인 계산:
+     * Kalman gain computation:
      * S = H * P * H^T + R     (3x3)
      * K = P * H^T * S^(-1)    (7x3)
      */
@@ -364,7 +396,7 @@ void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel)
         }
     }
 
-    /* 상태 업데이트: x = x + K * y */
+    /* State update: x = x + K * y */
     for (int i = 0; i < 7; i++)
     {
         for (int j = 0; j < 3; j++)
@@ -373,7 +405,7 @@ void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel)
         }
     }
 
-    /* 공분산 업데이트: P = (I - K*H) * P */
+    /* Covariance update: P = (I - K*H) * P */
     float KH[7][7];
     memset(KH, 0, sizeof(KH));
     for (int i = 0; i < 7; i++)
@@ -392,12 +424,27 @@ void ekf_update_accel(ekf_state_t *state, const vec3f_t *accel)
     {
         for (int j = 0; j < 7; j++)
         {
-            float I_KH = ((i == j) ? 1.0f : 0.0f) - KH[i][j];
             P_new[i][j] = 0.0f;
             for (int k = 0; k < 7; k++)
             {
-                P_new[i][j] += I_KH * state->P[k][j];
+                float IKH_ik = ((i == k) ? 1.0f : 0.0f) - KH[i][k];
+                P_new[i][j] += IKH_ik * state->P[k][j];
             }
+        }
+    }
+
+    /*
+     * Force symmetry instead of Joseph form P=(I-KH)*P*(I-KH)^T + K*R*K^T.
+     * Joseph form is numerically superior but doubles the matrix multiplications.
+     * Symmetry enforcement is a lightweight alternative sufficient for 7-state EKF.
+     */
+    for (int i = 0; i < 7; i++)
+    {
+        for (int j = i + 1; j < 7; j++)
+        {
+            float avg = 0.5f * (P_new[i][j] + P_new[j][i]);
+            P_new[i][j] = avg;
+            P_new[j][i] = avg;
         }
     }
     memcpy(state->P, P_new, sizeof(P_new));
@@ -413,7 +460,7 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
     float q0 = state->x[0], q1 = state->x[1];
     float q2 = state->x[2], q3 = state->x[3];
 
-    /* 자력계 벡터 정규화 */
+    /* Normalize magnetometer vector */
     float mnorm = sqrtf(mag->x * mag->x + mag->y * mag->y + mag->z * mag->z);
     if (mnorm < 1e-6f)
     {
@@ -424,8 +471,8 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
     float mz = mag->z / mnorm;
 
     /*
-     * 자력계 벡터를 지구 좌표계로 변환 후, 수평 성분만 사용 (yaw만 보정)
-     * h = R * m  (body → earth)
+     * Transform magnetometer vector to earth frame, use horizontal components only (yaw correction)
+     * h = R * m  (body -> earth)
      */
     float hx = (q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3) * mx
              + 2.0f * (q1 * q2 - q0 * q3) * my
@@ -434,14 +481,14 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
              + (q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3) * my
              + 2.0f * (q2 * q3 - q0 * q1) * mz;
 
-    /* 지구 좌표계의 자기 북극 방향 (수평 성분) */
+    /* Magnetic north direction in earth frame (horizontal component) */
     float bx = sqrtf(hx * hx + hy * hy);
     float bz_earth = 2.0f * (q1 * q3 - q0 * q2) * mx
                    + 2.0f * (q2 * q3 + q0 * q1) * my
                    + (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * mz;
 
     /*
-     * 예측 자력계 값: 지구 기준 [bx, 0, bz]를 body로 역변환
+     * Predicted magnetometer value: inverse-transform earth reference [bx, 0, bz] to body frame
      */
     float pred_mx = (q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3) * bx
                   + 2.0f * (q1 * q3 + q0 * q2) * bz_earth;
@@ -450,33 +497,40 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
     float pred_mz = 2.0f * (q1 * q3 - q0 * q2) * bx
                   + (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * bz_earth;
 
-    /* 잔차 */
+    /* Residual */
     float y[3];
     y[0] = mx - pred_mx;
     y[1] = my - pred_my;
     y[2] = mz - pred_mz;
 
     /*
-     * 자력계 야코비안 H는 복잡하므로 수치 근사 대신
-     * 가속도계와 동일한 구조의 간소화된 업데이트 사용.
+     * Magnetometer Jacobian H is complex, so numerical approximation is used
+     * instead of an analytical form.
      *
-     * 수치적으로 H를 구성:
-     * 여기서는 가속도계 업데이트와 동일한 칼만 게인 구조를 사용하되,
-     * 예측값과 잔차만 자력계 기반으로 교체.
+     * Uses the same Kalman gain structure as the accelerometer update,
+     * but with magnetometer-based predictions and residuals.
      */
 
-    /* 간소화된 H (3x7): 쿼터니언 편미분 수치 근사 */
+    /*
+     * Numerical Jacobian H (3x7):
+     * Save full quaternion before perturbation, restore after each axis.
+     * normalize changes all 4 elements, so single-element restore is insufficient.
+     */
     float H[3][7];
     memset(H, 0, sizeof(H));
     float delta = 1e-4f;
 
+    /* Save full quaternion state */
+    float q_save[4] = { state->x[0], state->x[1], state->x[2], state->x[3] };
+
     for (int j = 0; j < 4; j++)
     {
-        float x_save = state->x[j];
-
-        /* +delta */
-        state->x[j] = x_save + delta;
+        /* +delta: perturb j-th element, normalize, compute h */
+        state->x[0] = q_save[0]; state->x[1] = q_save[1];
+        state->x[2] = q_save[2]; state->x[3] = q_save[3];
+        state->x[j] += delta;
         ekf_normalize_quat(state);
+
         float qq0p = state->x[0], qq1p = state->x[1];
         float qq2p = state->x[2], qq3p = state->x[3];
 
@@ -487,9 +541,12 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
         float hzp = 2.0f * (qq1p * qq3p - qq0p * qq2p) * bx
                   + (qq0p * qq0p - qq1p * qq1p - qq2p * qq2p + qq3p * qq3p) * bz_earth;
 
-        /* -delta */
-        state->x[j] = x_save - delta;
+        /* -delta: restore, perturb negative, normalize, compute h */
+        state->x[0] = q_save[0]; state->x[1] = q_save[1];
+        state->x[2] = q_save[2]; state->x[3] = q_save[3];
+        state->x[j] -= delta;
         ekf_normalize_quat(state);
+
         float qq0m = state->x[0], qq1m = state->x[1];
         float qq2m = state->x[2], qq3m = state->x[3];
 
@@ -504,13 +561,13 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
         H[0][j] = (hxp - hxm) * inv_2delta;
         H[1][j] = (hyp - hym) * inv_2delta;
         H[2][j] = (hzp - hzm) * inv_2delta;
-
-        /* 복원 */
-        state->x[j] = x_save;
     }
-    ekf_normalize_quat(state);
 
-    /* 칼만 게인 계산 (가속도계 업데이트와 동일한 구조) */
+    /* Restore original quaternion */
+    state->x[0] = q_save[0]; state->x[1] = q_save[1];
+    state->x[2] = q_save[2]; state->x[3] = q_save[3];
+
+    /* Kalman gain computation (same structure as accelerometer update) */
 
     float PHt[7][3];
     for (int i = 0; i < 7; i++)
@@ -561,7 +618,7 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
         }
     }
 
-    /* 상태 업데이트 */
+    /* State update */
     for (int i = 0; i < 7; i++)
     {
         for (int j = 0; j < 3; j++)
@@ -570,7 +627,7 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
         }
     }
 
-    /* 공분산 업데이트 */
+    /* Covariance update */
     float KH[7][7];
     memset(KH, 0, sizeof(KH));
     for (int i = 0; i < 7; i++)
@@ -589,12 +646,27 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
     {
         for (int j = 0; j < 7; j++)
         {
-            float I_KH = ((i == j) ? 1.0f : 0.0f) - KH[i][j];
             P_new[i][j] = 0.0f;
             for (int k = 0; k < 7; k++)
             {
-                P_new[i][j] += I_KH * state->P[k][j];
+                float IKH_ik = ((i == k) ? 1.0f : 0.0f) - KH[i][k];
+                P_new[i][j] += IKH_ik * state->P[k][j];
             }
+        }
+    }
+
+    /*
+     * Force symmetry instead of Joseph form P=(I-KH)*P*(I-KH)^T + K*R*K^T.
+     * Joseph form is numerically superior but doubles the matrix multiplications.
+     * Symmetry enforcement is a lightweight alternative sufficient for 7-state EKF.
+     */
+    for (int i = 0; i < 7; i++)
+    {
+        for (int j = i + 1; j < 7; j++)
+        {
+            float avg = 0.5f * (P_new[i][j] + P_new[j][i]);
+            P_new[i][j] = avg;
+            P_new[j][i] = avg;
         }
     }
     memcpy(state->P, P_new, sizeof(P_new));
@@ -603,7 +675,7 @@ void ekf_update_mag(ekf_state_t *state, const vec3f_t *mag)
     ekf_update_euler(state);
 }
 
-/* ── Getter 함수 ────────────────────────────────────── */
+/* ── Getter functions ────────────────────────────────────── */
 
 void ekf_get_euler(const ekf_state_t *state, float *roll, float *pitch, float *yaw)
 {

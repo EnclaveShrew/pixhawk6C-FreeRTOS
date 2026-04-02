@@ -41,11 +41,11 @@ typedef enum
 typedef enum
 {
     FAILSAFE_NONE = 0,
-    FAILSAFE_IMU_SWITCH,        /* 이중 IMU 전환 */
-    FAILSAFE_ALTITUDE_HOLD,     /* 고도 유지 (GPS 불필요) */
+    FAILSAFE_IMU_SWITCH,        /* Switch to redundant IMU */
+    FAILSAFE_ALTITUDE_HOLD,     /* Altitude hold (no GPS needed) */
     FAILSAFE_RETURN_TO_LAUNCH,  /* RTL */
-    FAILSAFE_EMERGENCY_LAND,    /* 비상 착륙 */
-    FAILSAFE_DISARM,            /* 시동 끄기 */
+    FAILSAFE_EMERGENCY_LAND,    /* Emergency landing */
+    FAILSAFE_DISARM,            /* Disarm */
 } failsafe_action_t;
 
 /* ══════════════════════════════════════════════════════
@@ -53,13 +53,13 @@ typedef enum
  * ══════════════════════════════════════════════════════ */
 
 /**
- * @brief Report a non-fatal error (에러 카운터 증가, 로그 기록)
+ * @brief Report a non-fatal error (increment error counter, log)
  * @param err  Error code
  */
 void error_handler_report(system_error_t err);
 
 /**
- * @brief Handle fatal error (복구 불가, LED 점멸 후 리셋 대기)
+ * @brief Handle fatal error (unrecoverable, blink LED then wait for reset)
  * @param err  Error code
  */
 void error_handler_fatal(system_error_t err);

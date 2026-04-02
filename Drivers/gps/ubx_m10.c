@@ -2,26 +2,26 @@
  * @file ubx_m10.c
  * @brief u-blox M10 GPS driver — UBX protocol parser implementation
  *
- * UBX 패킷 구조:
+ * UBX packet structure:
  * [SYNC1 0xB5] [SYNC2 0x62] [CLASS] [ID] [LEN_L] [LEN_H] [PAYLOAD...] [CK_A] [CK_B]
  *
- * 체크섬: CLASS부터 PAYLOAD 끝까지 Fletcher-8 알고리즘
+ * Checksum: Fletcher-8 from CLASS to end of PAYLOAD
  */
 
 #include "ubx_m10.h"
 #include <string.h>
 
-/* ── UBX 메시지 빌더 (설정용) ──────────────────────── */
+/* ── UBX message builder (for configuration) ──────────────────────── */
 
 /**
- * @brief UBX 설정 메시지 전송
+ * @brief Send UBX config message
  */
 static int ubx_send_msg(ubx_dev_t *dev, uint8_t cls, uint8_t id, const uint8_t *payload, uint16_t len)
 {
     /* Header: SYNC1 + SYNC2 + CLASS + ID + LEN_L + LEN_H */
     uint8_t header[6] = {UBX_SYNC1, UBX_SYNC2, cls, id, (uint8_t)(len & 0xFF), (uint8_t)(len >> 8)};
 
-    /* 체크섬 계산: CLASS부터 PAYLOAD 끝까지 */
+    /* Checksum: from CLASS to end of PAYLOAD */
     uint8_t ck_a = 0, ck_b = 0;
 
     /* header[2..5] = CLASS, ID, LEN_L, LEN_H */
@@ -36,7 +36,7 @@ static int ubx_send_msg(ubx_dev_t *dev, uint8_t cls, uint8_t id, const uint8_t *
         ck_b += ck_a;
     }
 
-    /* 전송: header → payload → checksum */
+    /* Send: header -> payload -> checksum */
     if (uart_send(dev->uart_dev, header, 6) < 0)
     {
         return -1;
@@ -50,10 +50,10 @@ static int ubx_send_msg(ubx_dev_t *dev, uint8_t cls, uint8_t id, const uint8_t *
     return uart_send(dev->uart_dev, ck, 2);
 }
 
-/* ── NAV-PVT 페이로드 파싱 ─────────────────────────── */
+/* ── NAV-PVT payload parsing ─────────────────────────── */
 
 /**
- * @brief 리틀 엔디언 바이트를 정수로 변환
+ * @brief Convert little-endian bytes to integer
  */
 static uint16_t le16(const uint8_t *p)
 {
@@ -74,7 +74,7 @@ static void ubx_parse_nav_pvt(ubx_dev_t *dev)
 {
     const uint8_t *p = dev->payload;
 
-    /* NAV-PVT 페이로드 오프셋 (데이터시트 기준) */
+    /* NAV-PVT payload offsets (per datasheet) */
     dev->data.year = le16(&p[4]);
     dev->data.month = p[6];
     dev->data.day = p[7];
@@ -100,17 +100,17 @@ static void ubx_parse_nav_pvt(ubx_dev_t *dev)
     dev->data_valid = 1;
 }
 
-/* ── 초기화 ─────────────────────────────────────────── */
+/* ── Initialization ─────────────────────────────────────────── */
 
 int ubx_init(ubx_dev_t *dev)
 {
-    /* Parser 상태 초기화 */
+    /* Initialize parser state */
     dev->state = UBX_STATE_SYNC1;
     dev->data_valid = 0;
     memset(&dev->data, 0, sizeof(gps_data_t));
 
     /*
-     * CFG-MSG: NAV-PVT를 매 네비게이션 주기마다 출력
+     * CFG-MSG: output NAV-PVT every navigation cycle
      * payload: [CLASS] [ID] [rate]
      */
     uint8_t cfg_nav_pvt[] = {UBX_CLASS_NAV, UBX_NAV_PVT, 0x01};
@@ -122,7 +122,7 @@ int ubx_init(ubx_dev_t *dev)
     return SENSOR_OK;
 }
 
-/* ── 바이트 단위 파서 (상태 머신) ──────────────────── */
+/* ── Byte-level parser (state machine) ──────────────────── */
 
 int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte)
 {
@@ -177,7 +177,7 @@ int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte)
 
         if (dev->payload_len > UBX_MAX_PAYLOAD)
         {
-            /* 페이로드가 버퍼보다 크면 무시 */
+            /* Payload exceeds buffer, ignore */
             dev->state = UBX_STATE_SYNC1;
         }
         else if (dev->payload_len == 0)
@@ -208,7 +208,7 @@ int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte)
         }
         else
         {
-            /* 체크섬 불일치 */
+            /* Checksum mismatch */
             dev->state = UBX_STATE_SYNC1;
         }
         break;
@@ -218,7 +218,7 @@ int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte)
 
         if (byte == dev->ck_b)
         {
-            /* 체크섬 통과 — 메시지 처리 */
+            /* Checksum passed -- process message */
             if (dev->msg_class == UBX_CLASS_NAV && dev->msg_id == UBX_NAV_PVT && dev->payload_len == UBX_NAV_PVT_LEN)
             {
                 ubx_parse_nav_pvt(dev);
@@ -231,7 +231,7 @@ int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte)
     return 0;
 }
 
-/* ── 폴링 방식 수신 + 파싱 ─────────────────────────── */
+/* ── Polling receive + parse ─────────────────────────── */
 
 int ubx_poll(ubx_dev_t *dev)
 {
@@ -241,14 +241,14 @@ int ubx_poll(ubx_dev_t *dev)
     {
         if (ubx_parse_byte(dev, byte) == 1)
         {
-            return 1; /* 새 NAV-PVT 데이터 */
+            return 1; /* New NAV-PVT data */
         }
     }
 
     return 0;
 }
 
-/* ── GPS 데이터 가져오기 ───────────────────────────── */
+/* ── Get GPS data ───────────────────────────── */
 
 int ubx_get_data(const ubx_dev_t *dev, gps_data_t *data)
 {

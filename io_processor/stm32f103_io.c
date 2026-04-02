@@ -2,7 +2,7 @@
  * @file stm32f103_io.c
  * @brief IO Processor communication implementation
  *
- * 패킷 구조:
+ * Packet structure:
  *   [SYNC 0xA5] [TYPE] [LEN] [PAYLOAD...] [CRC8]
  */
 
@@ -10,9 +10,9 @@
 #include "stm32h7xx_hal.h"
 #include <string.h>
 
-#define IO_COMM_TIMEOUT_MS  200     /* IO 비응답 판정 시간 */
+#define IO_COMM_TIMEOUT_MS  200     /* IO non-response timeout */
 
-/* ── CRC-8 (간단한 체크섬) ─────────────────────────── */
+/* ── CRC-8 (simple checksum) ─────────────────────────── */
 
 static uint8_t crc8(const uint8_t *data, uint16_t len)
 {
@@ -35,7 +35,7 @@ static uint8_t crc8(const uint8_t *data, uint16_t len)
     return crc;
 }
 
-/* ── 내부: 패킷 전송 ──────────────────────────────── */
+/* ── Internal: send packet ──────────────────────────────── */
 
 static int io_send_packet(io_processor_t *io, uint8_t type,
                           const uint8_t *payload, uint8_t len)
@@ -77,7 +77,7 @@ int io_init(io_processor_t *io, uart_dev_t *uart_dev)
     memset(io, 0, sizeof(io_processor_t));
     io->uart_dev = uart_dev;
 
-    /* 기본 페일세이프: 모든 채널 1000us (최소) */
+    /* Default failsafe: all channels 1000us (minimum) */
     for (int i = 0; i < IO_MAX_PWM_CHANNELS; i++)
     {
         io->failsafe_pwm[i] = 1000;
@@ -111,7 +111,7 @@ int io_set_failsafe(io_processor_t *io, const uint16_t *pwm, uint8_t num)
         io->failsafe_pwm[i] = pwm[i];
     }
 
-    /* IO에 페일세이프 값 전송 */
+    /* Send failsafe values to IO */
     io_pwm_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
     pkt.num_channels = count;
@@ -123,11 +123,11 @@ int io_set_failsafe(io_processor_t *io, const uint16_t *pwm, uint8_t num)
 
 int io_poll(io_processor_t *io)
 {
-    /* TODO: 바이트 단위 상태 머신 파서 (UBX/MAVLink과 동일 패턴) */
+    /* TODO: Byte-level state machine parser (same pattern as UBX/MAVLink) */
     /*
-     * SYNC(0xA5) → TYPE → LEN → PAYLOAD → CRC 검증
-     * TYPE == IO_PKT_RC_INPUT → io->rc_input 갱신
-     * TYPE == IO_PKT_STATUS → 상태 처리
+     * SYNC(0xA5) -> TYPE -> LEN -> PAYLOAD -> CRC verify
+     * TYPE == IO_PKT_RC_INPUT -> update io->rc_input
+     * TYPE == IO_PKT_STATUS -> handle status
      */
 
     return 0;

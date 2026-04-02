@@ -1,9 +1,9 @@
 /**
  * @file uart_wrapper.c
- * @brief Thin UART wrapper — HAL 호출 추상화
+ * @brief Thin UART wrapper — HAL call abstraction
  *
- * GPS, 텔레메트리 등 UART 기반 장치가 이 래퍼를 통해 통신.
- * 나중에 DMA/인터럽트 수신으로 전환 시 이 파일 내부만 수정.
+ * GPS, telemetry, and other UART devices communicate through this wrapper.
+ * Only this file needs modification when switching to DMA/interrupt.
  */
 
 #include "uart_wrapper.h"

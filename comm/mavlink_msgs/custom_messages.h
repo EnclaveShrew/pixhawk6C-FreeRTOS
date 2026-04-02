@@ -2,10 +2,10 @@
  * @file custom_messages.h
  * @brief Custom MAVLink message definitions
  *
- * 표준 MAVLink에 없는 프로젝트 전용 메시지 정의.
- * GCS(QGC 등)에서 인식하려면 같은 XML로 빌드 필요.
+ * Project-specific messages not in standard MAVLink.
+ * GCS (QGC, etc.) must be built with the same XML to recognize these.
  *
- * ID 범위: 150000~ (개발용)
+ * ID range: 150000~ (development use)
  */
 
 #ifndef CUSTOM_MESSAGES_H
@@ -15,7 +15,7 @@
 
 /* ══════════════════════════════════════════════════════
  *  CONTROLLER_SWITCH (ID: 150000)
- *  GCS → FC: 제어기 전환 명령
+ *  GCS -> FC: controller switch command
  * ══════════════════════════════════════════════════════ */
 
 /*
@@ -32,7 +32,7 @@ typedef struct
 
 /* ══════════════════════════════════════════════════════
  *  CONTROLLER_STATUS (ID: 150001)
- *  FC → GCS: 현재 제어기 상태 보고
+ *  FC -> GCS: current controller status report
  * ══════════════════════════════════════════════════════ */
 
 /*

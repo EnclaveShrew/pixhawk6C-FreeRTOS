@@ -2,21 +2,21 @@
  * @file indi_controller.h
  * @brief INDI (Incremental Nonlinear Dynamic Inversion) controller
  *
- * 수학적 배경:
- *   일반 NDI: ω_dot = f(ω) + G·u → u = G^(-1)·(ω_dot_des - f(ω))
- *   → 정확한 모델 f(ω)가 필요 (모델링 오차에 취약)
+ * Mathematical background:
+ *   Standard NDI: w_dot = f(w) + G*u -> u = G^(-1)*(w_dot_des - f(w))
+ *   -> Requires accurate model f(w) (vulnerable to modeling errors)
  *
- *   INDI: 증분(incremental) 접근
- *   Δu = G^(-1) · (ω_dot_des - ω_dot_measured)
- *   u = u_prev + Δu
+ *   INDI: incremental approach
+ *   du = G^(-1) * (w_dot_des - w_dot_measured)
+ *   u = u_prev + du
  *
- *   → f(ω) 모델이 불필요. 이전 입력과 현재 각가속도 측정값만 사용.
- *   → 모델링 오차, 외란에 강인.
- *   → 단, 각가속도(ω_dot)를 정확히 측정/추정해야 함.
+ *   -> No f(w) model needed. Only uses previous input and current angular acceleration.
+ *   -> Robust to modeling errors and disturbances.
+ *   -> However, angular acceleration (w_dot) must be accurately measured/estimated.
  *
- * G 행렬: 제어 효과 행렬 (control effectiveness)
- *   각 축 토크가 각가속도에 미치는 영향.
- *   기체 관성 모멘트의 역수에 비례.
+ * G matrix: control effectiveness matrix
+ *   Effect of each axis torque on angular acceleration.
+ *   Proportional to inverse of vehicle moment of inertia.
  */
 
 #ifndef INDI_CONTROLLER_H
@@ -30,23 +30,23 @@
 
 typedef struct
 {
-    /* 자세 루프 P 게인 (자세 오차 → 목표 각속도) */
+    /* Attitude loop P gain (attitude error -> target angular rate) */
     float att_kp_roll;
     float att_kp_pitch;
     float att_kp_yaw;
 
     /*
-     * G_inv: 제어 효과 역행렬 (3x3, 대각 근사)
+     * G_inv: control effectiveness inverse (3x3, diagonal approx)
      * G_inv[i] = 1 / G[i][i]
-     * G[i][i] ≈ 1 / J[i] (관성 모멘트의 역수)
+     * G[i][i] ≈ 1 / J[i] (inverse of moment of inertia)
      *
-     * 실제 값은 기체 파라미터에서 결정.
+     * Actual values determined by vehicle parameters.
      */
     float g_inv_roll;
     float g_inv_pitch;
     float g_inv_yaw;
 
-    /* 각가속도 필터 계수 (LPF) */
+    /* Angular acceleration filter coefficient (LPF) */
     float gyro_dot_filter_alpha;
 
     float output_limit;
@@ -66,7 +66,35 @@ typedef struct
 }
 
 /* ══════════════════════════════════════════════════════
- *  Public — controller_t 인스턴스
+ *  Context (instance state)
+ * ══════════════════════════════════════════════════════ */
+
+typedef struct
+{
+    /* Attitude loop P gains */
+    float att_kp[3];
+
+    /* Control effectiveness inverse matrix (diagonal) */
+    float g_inv[3];
+
+    /* Previous gyro value (for angular acceleration computation) */
+    vec3f_t gyro_prev;
+
+    /* Filtered angular acceleration */
+    vec3f_t gyro_dot_filtered;
+
+    /* Previous control output */
+    float u_prev[3];
+
+    /* Configuration */
+    float gyro_dot_filter_alpha;
+    float output_limit;
+
+    uint8_t initialized;
+} indi_ctx_t;
+
+/* ══════════════════════════════════════════════════════
+ *  Public — controller_t instance
  * ══════════════════════════════════════════════════════ */
 
 extern controller_t indi_controller;

@@ -2,14 +2,14 @@
  * @file stm32f103_io.h
  * @brief IO Processor (STM32F103) communication and PWM management
  *
- * FMU(H743) ↔ IO(F103) 통신 프로토콜:
- *   FMU → IO: PWM 출력 값 (최대 8ch), 설정 명령
- *   IO → FMU: RC 입력 값, IO 상태
- *   주기: ~400Hz (PWM 업데이트 주기)
- *   체크섬: CRC-8
+ * FMU(H743) <-> IO(F103) comm protocol:
+ *   FMU → IO: PWM output values (up to 8ch), config commands
+ *   IO -> FMU: RC input values, IO status
+ *   Rate: ~400Hz (PWM update rate)
+ *   Checksum: CRC-8
  *
- * IO Processor 페일세이프:
- *   FMU 비응답 감지 시 → RC 패스스루 또는 안전 스로틀
+ * IO Processor failsafe:
+ *   On FMU non-response -> RC passthrough or safe throttle
  */
 
 #ifndef STM32F103_IO_H
@@ -27,11 +27,11 @@
 #define IO_MAX_RC_CHANNELS  16
 
 /* Packet types */
-#define IO_PKT_PWM_OUTPUT   0x01    /* FMU → IO: PWM 값 전달 */
-#define IO_PKT_RC_INPUT     0x02    /* IO → FMU: RC 입력 */
-#define IO_PKT_STATUS       0x03    /* IO → FMU: 상태 보고 */
-#define IO_PKT_CONFIG       0x04    /* FMU → IO: 설정 변경 */
-#define IO_PKT_FAILSAFE     0x05    /* FMU → IO: 페일세이프 값 설정 */
+#define IO_PKT_PWM_OUTPUT   0x01    /* FMU -> IO: PWM value transfer */
+#define IO_PKT_RC_INPUT     0x02    /* IO -> FMU: RC input */
+#define IO_PKT_STATUS       0x03    /* IO -> FMU: status report */
+#define IO_PKT_CONFIG       0x04    /* FMU -> IO: config change */
+#define IO_PKT_FAILSAFE     0x05    /* FMU → IO: set failsafe values */
 
 /* IO status flags */
 #define IO_STATUS_OK        0x00
@@ -42,36 +42,36 @@
  *  Data structures
  * ══════════════════════════════════════════════════════ */
 
-/* FMU → IO: PWM 출력 (18 bytes) */
+/* FMU -> IO: PWM output (18 bytes) */
 typedef struct
 {
-    uint16_t pwm[IO_MAX_PWM_CHANNELS];  /* PWM 값 (1000~2000 us) */
+    uint16_t pwm[IO_MAX_PWM_CHANNELS];  /* PWM values (1000~2000 us) */
     uint8_t num_channels;
     uint8_t armed;                       /* 0=disarmed, 1=armed */
 } __attribute__((packed)) io_pwm_packet_t;
 
-/* IO → FMU: RC 입력 */
+/* IO -> FMU: RC input */
 typedef struct
 {
-    uint16_t rc[IO_MAX_RC_CHANNELS];    /* RC 채널 값 (1000~2000 us) */
+    uint16_t rc[IO_MAX_RC_CHANNELS];    /* RC channel values (1000~2000 us) */
     uint8_t num_channels;
-    uint8_t rssi;                        /* 신호 강도 (0~255) */
-    uint8_t status;                      /* IO 상태 플래그 */
+    uint8_t rssi;                        /* Signal strength (0~255) */
+    uint8_t status;                      /* IO status flags */
 } __attribute__((packed)) io_rc_packet_t;
 
-/* IO Processor 상태 */
+/* IO Processor state */
 typedef struct
 {
     uart_dev_t *uart_dev;
 
-    /* 최신 RC 입력 */
+    /* Latest RC input */
     io_rc_packet_t rc_input;
     uint8_t rc_valid;
 
-    /* 페일세이프 PWM 값 */
+    /* Failsafe PWM values */
     uint16_t failsafe_pwm[IO_MAX_PWM_CHANNELS];
 
-    /* 통신 상태 */
+    /* Communication status */
     uint32_t last_rx_time;
     uint32_t tx_count;
     uint32_t rx_count;
@@ -101,7 +101,7 @@ int io_init(io_processor_t *io, uart_dev_t *uart_dev);
 int io_send_pwm(io_processor_t *io, const uint16_t *pwm, uint8_t num, uint8_t armed);
 
 /**
- * @brief Set failsafe PWM values (FMU 비응답 시 IO가 사용)
+ * @brief Set failsafe PWM values (Used by IO when FMU is unresponsive)
  * @param io   IO processor state
  * @param pwm  Failsafe PWM values
  * @param num  Number of channels

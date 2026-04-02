@@ -36,7 +36,7 @@
 /* NAV-PVT payload size */
 #define UBX_NAV_PVT_LEN 92
 
-/* Max payload size (NAV-PVT가 가장 큼) */
+/* Max payload size (NAV-PVT is the largest) */
 #define UBX_MAX_PAYLOAD 96
 
 /* ══════════════════════════════════════════════════════
@@ -54,7 +54,7 @@ typedef enum
 } gps_fix_t;
 
 /* ══════════════════════════════════════════════════════
- *  GPS data (NAV-PVT에서 추출)
+ *  GPS data (Extracted from NAV-PVT)
  * ══════════════════════════════════════════════════════ */
 
 typedef struct
@@ -69,22 +69,22 @@ typedef struct
 
     /* Fix */
     gps_fix_t fix_type;
-    uint8_t num_sv; /* 사용 위성 수 */
+    uint8_t num_sv; /* Satellites used */
 
     /* Position */
-    int32_t lat;     /* 위도 (1e-7 deg) */
-    int32_t lon;     /* 경도 (1e-7 deg) */
-    int32_t alt_msl; /* 해발 고도 (mm) */
+    int32_t lat;     /* Latitude (1e-7 deg) */
+    int32_t lon;     /* Longitude (1e-7 deg) */
+    int32_t alt_msl; /* Altitude MSL (mm) */
 
     /* Velocity */
-    int32_t vel_n;  /* 북 방향 속도 (mm/s) */
-    int32_t vel_e;  /* 동 방향 속도 (mm/s) */
-    int32_t vel_d;  /* 하 방향 속도 (mm/s) */
-    uint32_t speed; /* 지면 속도 (mm/s) */
+    int32_t vel_n;  /* North velocity (mm/s) */
+    int32_t vel_e;  /* East velocity (mm/s) */
+    int32_t vel_d;  /* Down velocity (mm/s) */
+    uint32_t speed; /* Ground speed (mm/s) */
 
     /* Accuracy estimates */
-    uint32_t h_acc; /* 수평 정확도 (mm) */
-    uint32_t v_acc; /* 수직 정확도 (mm) */
+    uint32_t h_acc; /* Horizontal accuracy (mm) */
+    uint32_t v_acc; /* Vertical accuracy (mm) */
 } gps_data_t;
 
 /* ══════════════════════════════════════════════════════
@@ -120,7 +120,7 @@ typedef struct
 
     /* Latest GPS data */
     gps_data_t data;
-    uint8_t data_valid; /* NAV-PVT를 최소 1회 성공적으로 파싱 */
+    uint8_t data_valid; /* Successfully parsed NAV-PVT at least once */
 } ubx_dev_t;
 
 /* ══════════════════════════════════════════════════════
@@ -132,7 +132,7 @@ typedef struct
  * @param dev  UBX device descriptor
  * @return 0 on success, negative error code on failure
  *
- * NAV-PVT 메시지를 1Hz로 출력하도록 설정.
+ * Configures NAV-PVT message output at 1Hz.
  */
 int ubx_init(ubx_dev_t *dev);
 
@@ -142,7 +142,7 @@ int ubx_init(ubx_dev_t *dev);
  * @param byte  Received byte from UART
  * @return 1 if a complete NAV-PVT message was parsed, 0 otherwise
  *
- * UART 수신 콜백 또는 폴링 루프에서 바이트마다 호출.
+ * Called per byte from UART RX callback or polling loop.
  */
 int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte);
 
@@ -151,8 +151,8 @@ int ubx_parse_byte(ubx_dev_t *dev, uint8_t byte);
  * @param dev  UBX device descriptor
  * @return 1 if new GPS data available, 0 if no new data, negative on error
  *
- * 내부적으로 바이트를 읽어서 ubx_parse_byte에 전달.
- * 새 NAV-PVT가 파싱되면 1 반환.
+ * Internally reads bytes and feeds them to ubx_parse_byte.
+ * Returns 1 when new NAV-PVT is parsed.
  */
 int ubx_poll(ubx_dev_t *dev);
 

@@ -9,11 +9,11 @@
 #include "stm32h7xx_hal.h"
 #include <stdint.h>
 
-/* ── I2C device descriptor (I2C 핸들 + 슬레이브 주소) ── */
+/* ── I2C device descriptor (I2C handle + slave address) ── */
 typedef struct
 {
     I2C_HandleTypeDef *hi2c;
-    uint8_t addr; /* 7-bit 주소 (HAL 내부에서 <<1 처리) */
+    uint8_t addr; /* 7-bit address (HAL internally shifts <<1) */
 } i2c_dev_t;
 
 /**

@@ -2,18 +2,18 @@
  * @file motor_mixer.h
  * @brief Motor mixing matrix for quadcopter
  *
- * 제어기 출력(roll, pitch, yaw, thrust)을 개별 모터 출력으로 변환.
+ * Converts controller output (roll, pitch, yaw, thrust) to individual motor outputs.
  *
- * 쿼드콥터 X 배치 (앞에서 볼 때):
+ * Quadcopter X layout (front view):
  *
- *     전방 (Front)
- *      1     2       Motor 1: 좌전 (CCW)
- *       \   /        Motor 2: 우전 (CW)
- *        [X]         Motor 3: 좌후 (CW)
- *       /   \        Motor 4: 우후 (CCW)
+ *     Front
+ *      1     2       Motor 1: front-left (CCW)
+ *       \   /        Motor 2: front-right (CW)
+ *        [X]         Motor 3: rear-left (CW)
+ *       /   \        Motor 4: rear-right (CCW)
  *      3     4
  *
- * 믹싱 공식:
+ * Mixing formula:
  *   motor[i] = thrust + roll_mix[i]*roll + pitch_mix[i]*pitch + yaw_mix[i]*yaw
  */
 
@@ -23,7 +23,7 @@
 #include "controller_interface.h"
 #include <stdint.h>
 
-/* 최대 모터 수 */
+/* Maximum number of motors */
 #define MIXER_MAX_MOTORS    8
 
 /* ══════════════════════════════════════════════════════
@@ -35,23 +35,23 @@ typedef struct
     uint8_t num_motors;
 
     /*
-     * 믹싱 계수 [모터 인덱스][축]
-     * 각 모터에 대해 roll, pitch, yaw 기여도.
-     * 값: -1.0 ~ +1.0
+     * Mixing coefficients [motor index][axis]
+     * Roll, pitch, yaw contribution for each motor.
+     * Values: -1.0 ~ +1.0
      */
     float mix[MIXER_MAX_MOTORS][3];  /* [motor][roll, pitch, yaw] */
 
-    float output_min;   /* 모터 최소 출력 (기본 0.0) */
-    float output_max;   /* 모터 최대 출력 (기본 1.0) */
-    float idle_throttle; /* 아이들 스로틀 (기본 0.05) */
+    float output_min;   /* motor min output (default 0.0) */
+    float output_max;   /* motor max output (default 1.0) */
+    float idle_throttle; /* idle throttle (default 0.05) */
 } mixer_config_t;
 
 /*
- * 쿼드콥터 X 배치 기본 설정
- * Motor 1 (좌전 CCW): +roll, +pitch, -yaw
- * Motor 2 (우전 CW):  -roll, +pitch, +yaw
- * Motor 3 (좌후 CW):  +roll, -pitch, +yaw
- * Motor 4 (우후 CCW): -roll, -pitch, -yaw
+ * Quad-X default configuration
+ * Motor 1 (front-left CCW): +roll, +pitch, -yaw
+ * Motor 2 (front-right CW):  -roll, +pitch, +yaw
+ * Motor 3 (rear-left CW):  +roll, -pitch, +yaw
+ * Motor 4 (rear-right CCW): -roll, -pitch, -yaw
  */
 #define MIXER_QUAD_X_CONFIG { \
     .num_motors = 4, \
@@ -72,7 +72,7 @@ typedef struct
 
 typedef struct
 {
-    float motor[MIXER_MAX_MOTORS];  /* 개별 모터 출력 (0.0~1.0) */
+    float motor[MIXER_MAX_MOTORS];  /* individual motor output (0.0~1.0) */
     uint8_t num_motors;
 } mixer_output_t;
 
@@ -94,8 +94,8 @@ int mixer_init(const mixer_config_t *cfg);
  * @return 0 on success
  *
  * motor[i] = thrust + mix[i][0]*roll + mix[i][1]*pitch + mix[i][2]*yaw
- * 출력은 [idle_throttle, output_max] 범위로 클램핑.
- * thrust가 0이면 모든 모터 0 (시동 꺼짐).
+ * Output is clamped to [idle_throttle, output_max].
+ * If thrust is 0, all motors are 0 (disarmed).
  */
 int mixer_mix(const controller_output_t *ctrl_out, mixer_output_t *mix_out);
 

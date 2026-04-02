@@ -1202,6 +1202,12 @@
                 </file>
             </group>
             <group>
+                <name>Comm</name>
+                <file>
+                    <name>$PROJ_DIR$\..\comm\mavlink_handler.c</name>
+                </file>
+            </group>
+            <group>
                 <name>Control</name>
                 <group>
                     <name>Mixer</name>

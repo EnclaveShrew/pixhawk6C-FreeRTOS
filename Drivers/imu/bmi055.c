@@ -2,23 +2,58 @@
  * @file bmi055.c
  * @brief BMI055 6-axis IMU driver implementation
  *
- * 데이터시트: BST-BMI055-DS000 (Bosch Sensortec)
+ * Datasheet: BST-BMI055-DS000 (Bosch Sensortec)
  * SPI Mode 3 (CPOL=1, CPHA=1), max 10 MHz
  *
- * 가속도계(BMA280)와 자이로(BMG160)가 별도 다이.
- * 각각 독립된 CS 핀으로 SPI 통신.
+ * Accel (BMA280) and gyro (BMG160) are separate dies.
+ * Each communicates via SPI with independent CS pin.
  */
 
 #include "bmi055.h"
 #include "stm32h7xx_hal.h"
 
-/* ── Helper: raw 16-bit 조합 (little-endian: LSB first) ── */
+/* ── Helper: raw 16-bit combine (little-endian: LSB first) ── */
 static inline int16_t combine_bytes_le(uint8_t lsb, uint8_t msb)
 {
     return (int16_t)((uint16_t)msb << 8 | lsb);
 }
 
-/* ── 초기화 ─────────────────────────────────────────── */
+/*
+ * Scale factor by FS (set during init).
+ * NOTE: module-static, so only one BMI055 instance supported.
+ * For multi-instance, move scale into a device context struct.
+ */
+static float s_accel_scale = BMI055_ACCEL_SCALE_16G;
+static float s_gyro_scale = BMI055_GYRO_SCALE_2000DPS;
+
+static float bmi055_get_accel_scale(uint8_t range)
+{
+    /* 12-bit signed, LSB/g varies by range */
+    switch (range)
+    {
+    case BMI055_ACC_RANGE_2G:  return 9.80665f / 1024.0f;
+    case BMI055_ACC_RANGE_4G:  return 9.80665f / 512.0f;
+    case BMI055_ACC_RANGE_8G:  return 9.80665f / 256.0f;
+    case BMI055_ACC_RANGE_16G: return 9.80665f / 128.0f;
+    default:                   return 9.80665f / 128.0f;
+    }
+}
+
+static float bmi055_get_gyro_scale(uint8_t range)
+{
+    /* 16-bit signed, LSB/dps, then deg→rad */
+    switch (range)
+    {
+    case BMI055_GYRO_RANGE_125DPS:  return 0.01745329252f / 262.4f;
+    case BMI055_GYRO_RANGE_250DPS:  return 0.01745329252f / 131.2f;
+    case BMI055_GYRO_RANGE_500DPS:  return 0.01745329252f / 65.6f;
+    case BMI055_GYRO_RANGE_1000DPS: return 0.01745329252f / 32.8f;
+    case BMI055_GYRO_RANGE_2000DPS: return 0.01745329252f / 16.4f;
+    default:                        return 0.01745329252f / 16.4f;
+    }
+}
+
+/* ── Initialization ─────────────────────────────────────────── */
 
 int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
 {
@@ -28,7 +63,11 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
         cfg = &default_cfg;
     }
 
-    /* 1. Soft Reset — 가속도계, 자이로 각각 */
+    /* Set scale factor based on FS */
+    s_accel_scale = bmi055_get_accel_scale(cfg->accel_range);
+    s_gyro_scale = bmi055_get_gyro_scale(cfg->gyro_range);
+
+    /* 1. Soft Reset -- accel and gyro separately */
     if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_SOFTRESET, BMI055_SOFT_RESET_CMD) < 0)
     {
         return SENSOR_ERR_COMM;
@@ -37,9 +76,9 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
     {
         return SENSOR_ERR_COMM;
     }
-    HAL_Delay(5); /* 데이터시트: soft reset 후 부팅 시간 */
+    HAL_Delay(5); /* Datasheet: boot time after soft reset */
 
-    /* 2. Chip ID 검증 — 가속도계 */
+    /* 2. Chip ID verification -- accelerometer */
     uint8_t acc_id = 0;
     if (spi_read_reg(dev->accel_dev, BMI055_ACC_REG_CHIP_ID, &acc_id) < 0)
     {
@@ -50,7 +89,7 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
         return SENSOR_ERR_ID;
     }
 
-    /* 3. Chip ID 검증 — 자이로 */
+    /* 3. Chip ID verification -- gyroscope */
     uint8_t gyro_id = 0;
     if (spi_read_reg(dev->gyro_dev, BMI055_GYRO_REG_CHIP_ID, &gyro_id) < 0)
     {
@@ -61,7 +100,7 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
         return SENSOR_ERR_ID;
     }
 
-    /* 4. 가속도계 설정: Range → BW → Normal mode */
+    /* 4. Accel config: Range → BW → Normal mode */
     if (spi_write_reg(dev->accel_dev, BMI055_ACC_REG_PMU_RANGE, cfg->accel_range) < 0)
     {
         return SENSOR_ERR_COMM;
@@ -75,7 +114,7 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
         return SENSOR_ERR_COMM;
     }
 
-    /* 5. 자이로 설정: Range → BW → Normal mode */
+    /* 5. Gyro config: Range → BW → Normal mode */
     if (spi_write_reg(dev->gyro_dev, BMI055_GYRO_REG_RANGE, cfg->gyro_range) < 0)
     {
         return SENSOR_ERR_COMM;
@@ -89,10 +128,10 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
         return SENSOR_ERR_COMM;
     }
 
-    /* 전원 모드 전환 안정화 대기 */
+    /* Wait for power mode stabilization */
     HAL_Delay(5);
 
-    /* 6. 설정 검증: 가속도계 Range readback */
+    /* 6. Config verification: accel Range readback */
     uint8_t readback = 0;
     if (spi_read_reg(dev->accel_dev, BMI055_ACC_REG_PMU_RANGE, &readback) < 0)
     {
@@ -103,7 +142,7 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
         return SENSOR_ERR_CONFIG;
     }
 
-    /* 7. 설정 검증: 자이로 Range readback */
+    /* 7. Config verification: gyro Range readback */
     if (spi_read_reg(dev->gyro_dev, BMI055_GYRO_REG_RANGE, &readback) < 0)
     {
         return SENSOR_ERR_COMM;
@@ -116,16 +155,16 @@ int bmi055_init(bmi055_dev_t *dev, const bmi055_config_t *cfg)
     return SENSOR_OK;
 }
 
-/* ── 가속도 읽기 ────────────────────────────────────── */
+/* ── Read accelerometer ────────────────────────────────────── */
 
 int bmi055_read_accel(bmi055_dev_t *dev, vec3f_t *accel)
 {
     /*
-     * 가속도 데이터: LSB first, 12-bit
-     * DATA_X_LSB(0x02) ~ DATA_Z_MSB(0x07) = 6바이트 연속
+     * Accel data: LSB first, 12-bit
+     * DATA_X_LSB(0x02) ~ DATA_Z_MSB(0x07) = 6 bytes consecutive
      *
-     * LSB 레지스터 하위 4비트는 새 데이터 플래그 등이므로,
-     * 16-bit로 조합 후 >>4 하여 12-bit signed 값을 얻음
+     * Lower 4 bits of LSB register are new data flag etc.,
+     * combine to 16-bit then >>4 to get 12-bit signed value
      */
     uint8_t buf[6];
 
@@ -138,20 +177,20 @@ int bmi055_read_accel(bmi055_dev_t *dev, vec3f_t *accel)
     int16_t raw_y = combine_bytes_le(buf[2], buf[3]) >> 4;
     int16_t raw_z = combine_bytes_le(buf[4], buf[5]) >> 4;
 
-    accel->x = (float)raw_x * BMI055_ACCEL_SCALE_16G;
-    accel->y = (float)raw_y * BMI055_ACCEL_SCALE_16G;
-    accel->z = (float)raw_z * BMI055_ACCEL_SCALE_16G;
+    accel->x = (float)raw_x * s_accel_scale;
+    accel->y = (float)raw_y * s_accel_scale;
+    accel->z = (float)raw_z * s_accel_scale;
 
     return SENSOR_OK;
 }
 
-/* ── 자이로 읽기 ────────────────────────────────────── */
+/* ── Read gyroscope ────────────────────────────────────── */
 
 int bmi055_read_gyro(bmi055_dev_t *dev, vec3f_t *gyro)
 {
     /*
-     * 자이로 데이터: LSB first, 16-bit
-     * RATE_X_LSB(0x02) ~ RATE_Z_MSB(0x07) = 6바이트 연속
+     * Gyro data: LSB first, 16-bit
+     * RATE_X_LSB(0x02) ~ RATE_Z_MSB(0x07) = 6 bytes consecutive
      */
     uint8_t buf[6];
 
@@ -164,20 +203,20 @@ int bmi055_read_gyro(bmi055_dev_t *dev, vec3f_t *gyro)
     int16_t raw_y = combine_bytes_le(buf[2], buf[3]);
     int16_t raw_z = combine_bytes_le(buf[4], buf[5]);
 
-    gyro->x = (float)raw_x * BMI055_GYRO_SCALE_2000DPS;
-    gyro->y = (float)raw_y * BMI055_GYRO_SCALE_2000DPS;
-    gyro->z = (float)raw_z * BMI055_GYRO_SCALE_2000DPS;
+    gyro->x = (float)raw_x * s_gyro_scale;
+    gyro->y = (float)raw_y * s_gyro_scale;
+    gyro->z = (float)raw_z * s_gyro_scale;
 
     return SENSOR_OK;
 }
 
-/* ── 가속도 + 자이로 읽기 ──────────────────────────── */
+/* ── Accel + gyro read ──────────────────────────── */
 
 int bmi055_read_accel_gyro(bmi055_dev_t *dev, vec3f_t *accel, vec3f_t *gyro)
 {
     /*
-     * 별도 다이이므로 SPI 트랜잭션 2회 필요.
-     * ICM-42688-P처럼 12바이트 버스트 읽기는 불가.
+     * Separate dies require 2 SPI transactions.
+     * 12-byte burst read like ICM-42688-P is not possible.
      */
     int ret = bmi055_read_accel(dev, accel);
     if (ret < 0)

@@ -29,14 +29,14 @@
 /* ADC read */
 #define MS5611_CMD_ADC_READ 0x00
 
-/* Pressure conversion (D1) — OSR 선택 */
+/* Pressure conversion (D1) — OSR select */
 #define MS5611_CMD_CONV_D1_256 0x40
 #define MS5611_CMD_CONV_D1_512 0x42
 #define MS5611_CMD_CONV_D1_1024 0x44
 #define MS5611_CMD_CONV_D1_2048 0x46
 #define MS5611_CMD_CONV_D1_4096 0x48
 
-/* Temperature conversion (D2) — OSR 선택 */
+/* Temperature conversion (D2) — OSR select */
 #define MS5611_CMD_CONV_D2_256 0x50
 #define MS5611_CMD_CONV_D2_512 0x52
 #define MS5611_CMD_CONV_D2_1024 0x54
@@ -56,8 +56,8 @@
  * ══════════════════════════════════════════════════════ */
 
 /*
- * OSR이 높을수록: 해상도 좋음, 변환 시간 김
- * | OSR  | 해상도(mbar) | 변환 시간 |
+ * Higher OSR: better resolution, longer conversion time
+ * | OSR  | Resolution(mbar) | Conv. time |
  * |------|-------------|----------|
  * |  256 | 0.065       | 1.0 ms   |
  * |  512 | 0.042       | 2.0 ms   |
@@ -83,7 +83,7 @@ typedef struct
 {
     i2c_dev_t *i2c_dev;
 
-    /* PROM calibration coefficients (공장 교정값) */
+    /* PROM calibration coefficients (Factory calibration values) */
     uint16_t c1; /* Pressure sensitivity (SENST1) */
     uint16_t c2; /* Pressure offset (OFFT1) */
     uint16_t c3; /* Temp coeff of pressure sensitivity (TCS) */
@@ -91,7 +91,7 @@ typedef struct
     uint16_t c5; /* Reference temperature (TREF) */
     uint16_t c6; /* Temp coeff of temperature (TEMPSENS) */
 
-    /* OSR 설정 */
+    /* OSR Configuration */
     ms5611_osr_t osr;
 } ms5611_dev_t;
 
@@ -118,9 +118,9 @@ int ms5611_init(ms5611_dev_t *dev, ms5611_osr_t osr);
  * @param press_pa  Output: pressure in Pa (nullable)
  * @return 0 on success, negative on error
  *
- * 내부적으로 D2(온도) → D1(기압) 순서로 변환 + ADC 읽기.
- * 2nd order temperature compensation 적용.
- * OSR에 따라 최대 ~20ms 소요.
+ * Internally converts D2 (temperature) then D1 (pressure) + ADC read.
+ * 2nd order temperature compensation applied.
+ * Takes up to ~20ms depending on OSR.
  */
 int ms5611_read(ms5611_dev_t *dev, float *temp_c, float *press_pa);
 

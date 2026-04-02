@@ -9,7 +9,7 @@
 #include "stm32h7xx_hal.h"
 #include <stdint.h>
 
-/* ── SPI device descriptor (SPI 핸들 + CS 핀 정보) ── */
+/* ── SPI device descriptor (SPI handle + CS pin info) ── */
 typedef struct
 {
     SPI_HandleTypeDef *hspi;

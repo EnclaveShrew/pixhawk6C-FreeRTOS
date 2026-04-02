@@ -9,7 +9,7 @@
 #include "stm32h7xx_hal.h"
 
 /**
- * @brief Initialize debug UART (USART3 핸들 등록)
+ * @brief Initialize debug UART (Register USART3 handle)
  * @param huart  Pointer to USART3 handle
  */
 void debug_init(UART_HandleTypeDef *huart);
