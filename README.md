@@ -19,7 +19,7 @@ Pixhawk 6C + FreeRTOS 기반 FC Firmware 개발 프로젝트.
 1. Clone this repository
 2. Open `EWARM/pixhawk6-bare-fc.ewp` in IAR EWARM
 3. Build (F7)
-4. Flash via USB-C (DFU mode: hold BOOT0 button + reset)
+4. Flash via USB-C (DFU mode) or SWD debug port (requires JST-SH adapter)
 
 ## License
 
