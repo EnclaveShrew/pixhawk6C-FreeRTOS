@@ -1,6 +1,6 @@
 # Pixhawk6C FreeRTOS Base Firmware Project
 
-Pixhawk 6C + FreeRTOS 기반 FC Firmware 개발 프로젝트.
+Pixhawk 6C + FreeRTOS Based FW
 
 ## Hardware
 
